@@ -52,6 +52,12 @@ void main() {
       await tester.pumpAndSettle();
       await expectLater(
         find.byType(YenmaApp),
+        matchesGoldenFile('../docs/previews/welcome-$theme.png'),
+      );
+      await tester.tap(find.text('Open my money'));
+      await tester.pumpAndSettle();
+      await expectLater(
+        find.byType(YenmaApp),
         matchesGoldenFile('../docs/previews/overview-$theme.png'),
       );
       await repository.saveDebt(
@@ -92,7 +98,9 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();
       await tester.pumpWidget(
-        RepaintBoundary(child: YenmaApp(repository: repository)),
+        RepaintBoundary(
+          child: YenmaApp(showWelcome: false, repository: repository),
+        ),
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Debts'));

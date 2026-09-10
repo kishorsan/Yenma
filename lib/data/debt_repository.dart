@@ -29,8 +29,36 @@ Future<void> createDebtSchema(DatabaseExecutor db) async {
   await db.execute('CREATE INDEX repayments_debt ON repayments(debt_id)');
 }
 
+Future<void> createPeopleSchema(DatabaseExecutor db) async {
+  await db.execute(
+    '''CREATE TABLE debt_people (
+    name_key TEXT PRIMARY KEY, name TEXT NOT NULL CHECK(length(trim(name)) > 0))''',
+  );
+  final existing = await db.query(
+    'debts',
+    columns: ['person'],
+    orderBy: 'id ASC',
+  );
+  final batch = db.batch();
+  for (final row in existing) {
+    final name = normalizePersonName(row['person'] as String);
+    if (name.isNotEmpty) {
+      batch.insert('debt_people', {
+        'name_key': personNameKey(name),
+        'name': name,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
+  }
+  await batch.commit(noResult: true);
+}
+
 mixin SqliteDebtOperations implements DebtRepository {
   Database get debtDatabase;
+  @override
+  Future<List<String>> people() async => (await debtDatabase.query(
+    'debt_people',
+    orderBy: 'name_key ASC',
+  )).map((row) => row['name'] as String).toList();
   Future<int> writeTransaction(
     DatabaseExecutor db,
     MoneyTransaction transaction,
@@ -164,9 +192,14 @@ mixin SqliteDebtOperations implements DebtRepository {
         );
       }
     }
+    final name = normalizePersonName(draft.person);
+    await db.insert('debt_people', {
+      'name_key': personNameKey(name),
+      'name': name,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
     final row = <String, Object?>{
       'transaction_id': draft.transactionId,
-      'person': draft.person.trim().replaceAll(RegExp(r'\s+'), ' '),
+      'person': name,
       'title': draft.title.trim(),
       'amount_paise': draft.amountPaise,
       'direction': draft.direction.name,

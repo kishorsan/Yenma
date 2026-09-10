@@ -13,6 +13,7 @@ class MoneyController extends ChangeNotifier {
   final MoneyRepository repository;
   final ReceiptSource receipts;
   List<DebtRecord> debts = [];
+  List<String> people = [];
   bool debtsLoading = false;
   String? debtError;
   Uint8List? recoveredReceipt;
@@ -101,7 +102,11 @@ class MoneyController extends ChangeNotifier {
     _emit();
     try {
       final result = await repository.debts();
-      if (generation == _debtGeneration) debts = result;
+      final names = await repository.people();
+      if (generation == _debtGeneration) {
+        debts = result;
+        people = names;
+      }
     } catch (_) {
       if (generation == _debtGeneration) {
         debtError = 'Debt records could not be loaded. Please retry.';

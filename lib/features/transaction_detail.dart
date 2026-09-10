@@ -76,13 +76,12 @@ class _TransactionDetailState extends State<TransactionDetail> {
             child: ListView(
               padding: const EdgeInsets.all(24),
               children: [
-                const SizedBox(height: 16),
-                Icon(categoryIcon(category.icon), size: 48),
-                const SizedBox(height: 20),
+                Icon(categoryIcon(category.icon), size: 28),
+                const SizedBox(height: 12),
                 Text(
                   transaction.title,
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.headlineMedium,
+                  style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 12),
                 FittedBox(

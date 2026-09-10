@@ -8,6 +8,7 @@ import '../app/money_controller.dart';
 import '../domain/money.dart';
 import '../domain/debt.dart';
 import 'debts/receipt_editor.dart';
+import 'debts/person_name_field.dart';
 
 class TransactionForm extends StatefulWidget {
   const TransactionForm({
@@ -120,9 +121,9 @@ class _TransactionFormState extends State<TransactionForm> {
                 children: [
                   Text(
                     'A little detail. A clearer picture.',
-                    style: Theme.of(context).textTheme.titleMedium,
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 12),
                   SegmentedButton<TransactionKind>(
                     segments: TransactionKind.values
                         .map(
@@ -246,14 +247,11 @@ class _TransactionFormState extends State<TransactionForm> {
                           : (value) => setState(() => _split = value),
                     ),
                     if (_split) ...[
-                      TextFormField(
+                      PersonNameField(
                         controller: _friend,
                         enabled: !_saving,
-                        maxLength: 80,
-                        textCapitalization: TextCapitalization.words,
-                        decoration: const InputDecoration(
-                          labelText: 'Friend’s name',
-                        ),
+                        people: widget.controller.people,
+                        label: 'Friend’s name',
                         validator: (value) =>
                             value == null || value.trim().isEmpty
                             ? 'Enter your friend’s name'

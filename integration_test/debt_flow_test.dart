@@ -100,8 +100,7 @@ void main() {
       // Platform database futures can complete between frames on an emulator.
       for (
         var i = 0;
-        i < 50 &&
-            find.text('Your money,\na little clearer.').evaluate().isEmpty;
+        i < 50 && find.text('Your money, a little clearer.').evaluate().isEmpty;
         i++
       ) {
         await tester.pump(const Duration(milliseconds: 100));

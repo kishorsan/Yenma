@@ -24,13 +24,18 @@ ThemeData yenmaTheme(Brightness brightness) {
         surface: dark ? const Color(0xFF111C20) : const Color(0xFFF7F9F7),
         primary: dark ? mint : const Color(0xFF146B50),
       );
-  return ThemeData(
-    useMaterial3: true,
-    colorScheme: scheme,
+  final base = ThemeData(useMaterial3: true, colorScheme: scheme);
+  return base.copyWith(
     scaffoldBackgroundColor: scheme.surface,
-    appBarTheme: const AppBarTheme(
+    appBarTheme: AppBarTheme(
       centerTitle: false,
       scrolledUnderElevation: 0,
+      toolbarHeight: 48,
+      titleTextStyle: base.textTheme.titleLarge!.copyWith(
+        fontSize: 18,
+        fontWeight: FontWeight.w600,
+        color: scheme.onSurface,
+      ),
     ),
     cardTheme: CardThemeData(
       elevation: 0,

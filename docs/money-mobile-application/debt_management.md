@@ -1,4 +1,10 @@
-# Debt management — Yenma 0.2.0
+# Debt management — Yenma 0.2.2
+
+## Saved people
+
+The person field in debt forms and **Split with a friend** offers previously saved names. Focus an empty field to browse, type to filter, or tap the person-search icon to show all names without clearing your input. Selecting a suggestion fills the field; a new name can always be entered. Matching ignores capitalization and extra spaces.
+
+Names are saved locally after a successful debt save and remain available after settlement or deletion. Schema **3** introduces `debt_people` and backfills names from existing open and settled debts during upgrade. Existing debt and repayment records are preserved. Repository and widget checks cover migration, deduplication, persistence, failed-save rollback, filtering and selection in both forms.
 
 ## A ₹500 meal split
 

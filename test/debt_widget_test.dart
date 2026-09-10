@@ -46,7 +46,11 @@ void main() {
       final repository = MemoryRepository();
       final receipts = FakeReceiptSource();
       await tester.pumpWidget(
-        YenmaApp(repository: repository, receipts: receipts),
+        YenmaApp(
+          showWelcome: false,
+          repository: repository,
+          receipts: receipts,
+        ),
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Add transaction'));
@@ -107,7 +111,11 @@ void main() {
       final repository = MemoryRepository();
       final receipts = FakeReceiptSource()..image = null;
       await tester.pumpWidget(
-        YenmaApp(repository: repository, receipts: receipts),
+        YenmaApp(
+          showWelcome: false,
+          repository: repository,
+          receipts: receipts,
+        ),
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Debts'));

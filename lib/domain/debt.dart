@@ -19,6 +19,10 @@ class DebtValidationException implements Exception {
 
 const maxReceiptBytes = 10 * 1024 * 1024;
 
+String normalizePersonName(String name) =>
+    name.trim().replaceAll(RegExp(r'\s+'), ' ');
+String personNameKey(String name) => normalizePersonName(name).toLowerCase();
+
 class DebtDraft {
   const DebtDraft({
     this.id,
@@ -122,6 +126,7 @@ class Repayment {
 }
 
 abstract interface class DebtRepository {
+  Future<List<String>> people();
   Future<List<DebtRecord>> debts();
   Future<void> saveDebt(DebtDraft draft);
   Future<void> saveSharedExpense(MoneyTransaction transaction, DebtDraft draft);

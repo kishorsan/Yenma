@@ -25,6 +25,8 @@ See [Debt management](docs/money-mobile-application/debt_management.md) for the 
 
 ## Run
 
+On a fresh launch, Yenma briefly shows a random welcome quote (two seconds, or skip with **Open my money**). It does not reappear while switching pages or resuming the app. Page headers are compact so payment information stays prominent; the Settings heading is unchanged. Screen-reader users continue manually so the quote does not disappear while being read.
+
 Verified with Flutter 3.47.2 / Dart 3.13.2. Open this folder in Android Studio or VS Code with Flutter support, start an Android emulator or connect a device, then:
 
 ```powershell
@@ -53,7 +55,9 @@ The local machine's Android toolchain has missing command-line tools/unknown lic
 - `test/`: domain, SQLite persistence, state-race and widget workflow tests.
 - `tool/preview_test.dart`: optional screenshot generation with synthetic data.
 
-The database is `yenma.db`, schema version 2, in the app's private database directory. Version 1 upgrades automatically to version 2. Every future schema change needs an explicit migration. INR is the supported currency.
+Saved people appear as suggestions in **Add debt** and **Split with a friend**. Tap the name field to choose someone, type to filter, or enter a new name. Names from existing debts are included automatically and remain available after settlement or deletion. Matching ignores capitalization and extra spaces.
+
+The database is `yenma.db`, schema version 3, in the app's private database directory. Versions 1 and 2 upgrade automatically to version 3. Every future schema change needs an explicit migration. INR is the supported currency.
 
 ## Documentation
 

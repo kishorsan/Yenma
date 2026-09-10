@@ -7,6 +7,7 @@ import '../../app/money_controller.dart';
 import '../../domain/debt.dart';
 import '../../domain/money.dart';
 import 'receipt_editor.dart';
+import 'person_name_field.dart';
 
 class DebtForm extends StatefulWidget {
   const DebtForm({
@@ -151,15 +152,11 @@ class _DebtFormState extends State<DebtForm> {
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                   ),
-                TextFormField(
+                PersonNameField(
                   controller: _person,
                   enabled: !_saving,
-                  textCapitalization: TextCapitalization.words,
-                  maxLength: 80,
-                  decoration: const InputDecoration(
-                    labelText: 'Person',
-                    hintText: 'e.g. Arun',
-                  ),
+                  people: widget.controller.people,
+                  label: 'Person',
                   validator: (value) => value == null || value.trim().isEmpty
                       ? 'Enter the person’s name'
                       : null,

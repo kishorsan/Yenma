@@ -5,6 +5,11 @@ import 'package:yenma/domain/debt.dart';
 import 'dart:typed_data';
 
 class MemoryRepository implements MoneyRepository {
+  final _people = <String, String>{};
+  @override
+  Future<List<String>> people() async =>
+      _people.values.toList()
+        ..sort((a, b) => personNameKey(a).compareTo(personNameKey(b)));
   final List<MoneyTransaction> entries = [];
   String theme = 'system';
   bool failSave = false;
@@ -86,6 +91,10 @@ class MemoryRepository implements MoneyRepository {
   Future<void> saveDebt(DebtDraft draft) async {
     if (failSave) throw StateError('Disk full');
     final id = draft.id ?? ++_debtId;
+    _people.putIfAbsent(
+      personNameKey(draft.person),
+      () => normalizePersonName(draft.person),
+    );
     _debts[id] = draft;
     if (draft.removeReceipt) {
       _receipts.remove(id);

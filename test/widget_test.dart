@@ -11,7 +11,9 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(430, 1000));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final repository = MemoryRepository();
-      await tester.pumpWidget(YenmaApp(repository: repository));
+      await tester.pumpWidget(
+        YenmaApp(showWelcome: false, repository: repository),
+      );
       await tester.pumpAndSettle();
       expect(find.text('A fresh page for your money'), findsOneWidget);
       await tester.tap(find.text('Add transaction'));
@@ -58,7 +60,9 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(430, 1100));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final repository = MemoryRepository()..failSave = true;
-    await tester.pumpWidget(YenmaApp(repository: repository));
+    await tester.pumpWidget(
+      YenmaApp(showWelcome: false, repository: repository),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Add transaction'));
     await tester.pumpAndSettle();

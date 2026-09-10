@@ -55,11 +55,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           !controller.initializing && controller.categories.isNotEmpty;
       return Scaffold(
         appBar: AppBar(
+          toolbarHeight: _tab == 3 ? kToolbarHeight : 48,
+          titleTextStyle: _tab == 3
+              ? Theme.of(context).textTheme.titleLarge
+              : null,
           title: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: EdgeInsets.all(_tab == 3 ? 8 : 6),
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.primaryContainer,
                   borderRadius: BorderRadius.circular(12),
@@ -70,24 +74,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ),
               const SizedBox(width: 10),
-              const Text(
+              Text(
                 'yenma',
                 style: TextStyle(
                   fontWeight: FontWeight.w800,
                   letterSpacing: -1,
+                  fontSize: _tab == 3 ? null : 19,
                 ),
               ),
             ],
           ),
           actions: [
-            Padding(
-              padding: const EdgeInsets.only(right: 20),
-              child: Text(
-                'MONEY, IN VIEW',
-                style: Theme.of(context).textTheme.labelSmall
-                    ?.copyWith(letterSpacing: 1.2),
+            if (_tab == 3)
+              Padding(
+                padding: const EdgeInsets.only(right: 20),
+                child: Text(
+                  'MONEY, IN VIEW',
+                  style: Theme.of(context).textTheme.labelSmall
+                      ?.copyWith(letterSpacing: 1.2),
+                ),
               ),
-            ),
           ],
         ),
         body: controller.initializing
@@ -183,23 +189,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   Text(
                     _tab == 0
-                        ? 'Your money,\na little clearer.'
+                        ? 'Your money, a little clearer.'
                         : 'Your transactions',
-                    style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -1,
-                    ),
+                    style: Theme.of(context).textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _tab == 0
-                        ? 'Small habits. A bigger picture.'
-                        : 'Every income, expense and transfer in one place.',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 12),
                   _monthSelector(),
                   const SizedBox(height: 20),
                   if (!controller.loading && controller.error == null) ...[
@@ -217,7 +212,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             _tab == 0
                                 ? 'Recent activity'
                                 : '${controller.transactions.length} transactions',
-                            style: Theme.of(context).textTheme.titleLarge
+                            style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(fontWeight: FontWeight.bold),
                           ),
                         ),
@@ -632,7 +627,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
       ),
       const SizedBox(height: 28),
-      Text('Yenma · 0.2.0', style: Theme.of(context).textTheme.titleMedium),
+      Text('Yenma · 0.2.2', style: Theme.of(context).textTheme.titleMedium),
       const SizedBox(height: 8),
       const Text('A quieter way to keep track of your money.'),
     ],

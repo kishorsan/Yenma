@@ -44,15 +44,11 @@ class _DebtsScreenState extends State<DebtsScreen> {
           physics: const AlwaysScrollableScrollPhysics(),
           children: [
             Text(
-              'Keep the split.\nSkip the awkward maths.',
-              style: Theme.of(context).textTheme.headlineMedium
+              'Keep the split. Skip the awkward maths.',
+              style: Theme.of(context).textTheme.titleMedium
                   ?.copyWith(fontWeight: FontWeight.bold),
             ),
-            const SizedBox(height: 8),
-            const Text(
-              'Your IOUs, receipts and repayments — all in one place.',
-            ),
-            const SizedBox(height: 24),
+            const SizedBox(height: 12),
             if (controller.receiptRecoveryError != null)
               Card(
                 child: ListTile(

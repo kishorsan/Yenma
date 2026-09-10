@@ -35,7 +35,7 @@ class SqliteMoneyRepository
     _database = await _factory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 2,
+        version: 3,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: (db, version) async {
           await db.execute('''CREATE TABLE categories (
@@ -68,9 +68,11 @@ class SqliteMoneyRepository
           }
           await batch.commit(noResult: true);
           await createDebtSchema(db);
+          await createPeopleSchema(db);
         },
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) await createDebtSchema(db);
+          if (oldVersion < 3) await createPeopleSchema(db);
         },
       ),
     );
