@@ -16,6 +16,8 @@ Names are saved locally after a successful debt save and remain available after 
 
 Payment details show what you paid, your share/unallocated amount, and each friend's original share and remaining debt. Use **Add a friend’s share** to split an existing expense or add more people. Original shares together cannot exceed the payment, including shares already repaid.
 
+You can also use **Edit transaction → Split with a friend** on a recorded expense. Saving updates the same payment and adds the new debt atomically. Existing shares are preserved and deducted from the available amount; a rejected debt rolls back the payment edit too.
+
 ## Debt log and reminders
 
 The **Debts** tab shows money owed to you and money you owe across all dates. Entries are grouped by person, with Outstanding/Settled tabs and search by person or description. Grouping ignores capitalization and repeated spaces; use distinct names for different people with the same first name. This version has no contact IDs or phone-book integration.

@@ -43,6 +43,12 @@ class _TransactionFormState extends State<TransactionForm> {
   bool _split = false;
   bool _picking = false;
   Uint8List? _receipt;
+  int get _allocated => widget.transaction?.id == null
+      ? 0
+      : widget.controller
+            .shares(widget.transaction!.id!)
+            .fold(0, (sum, debt) => sum + debt.amountPaise);
+  int get _available => (parsePaise(_amount.text) ?? 0) - _allocated;
   @override
   void dispose() {
     _title.dispose();
@@ -69,9 +75,7 @@ class _TransactionFormState extends State<TransactionForm> {
         date: _date,
         note: _note.text,
       );
-      if (_split &&
-          _kind == TransactionKind.expense &&
-          widget.transaction == null) {
+      if (_split && _kind == TransactionKind.expense) {
         await widget.controller.saveSharedExpense(
           transaction,
           DebtDraft(
@@ -233,8 +237,7 @@ class _TransactionFormState extends State<TransactionForm> {
                       alignLabelWithHint: true,
                     ),
                   ),
-                  if (_kind == TransactionKind.expense &&
-                      widget.transaction == null) ...[
+                  if (_kind == TransactionKind.expense) ...[
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       title: const Text('Split with a friend'),
@@ -247,6 +250,10 @@ class _TransactionFormState extends State<TransactionForm> {
                           : (value) => setState(() => _split = value),
                     ),
                     if (_split) ...[
+                      if (_allocated > 0)
+                        Text(
+                          'Existing shares: ${formatMoney(_allocated)} · Unallocated: ${formatMoney(_available)}',
+                        ),
                       PersonNameField(
                         controller: _friend,
                         enabled: !_saving,
@@ -272,8 +279,10 @@ class _TransactionFormState extends State<TransactionForm> {
                         validator: (value) {
                           final share = parsePaise(value ?? '');
                           final total = parsePaise(_amount.text);
-                          return share == null || total == null || share > total
-                              ? 'Enter a share no larger than the payment'
+                          return share == null ||
+                                  total == null ||
+                                  share > _available
+                              ? 'Enter a share no larger than the unallocated amount'
                               : null;
                         },
                       ),
@@ -284,20 +293,24 @@ class _TransactionFormState extends State<TransactionForm> {
                               ? null
                               : () {
                                   final half =
-                                      (parsePaise(_amount.text) ?? 0) ~/ 2;
+                                      (_available > 0 ? _available : 0) ~/ 2;
                                   setState(
                                     () => _share.text =
                                         '${half ~/ 100}.${(half % 100).toString().padLeft(2, '0')}',
                                   );
                                 },
-                          child: const Text('Split equally'),
+                          child: Text(
+                            _allocated == 0
+                                ? 'Split equally'
+                                : 'Half of the unallocated amount',
+                          ),
                         ),
                       ),
                       if (parsePaise(_share.text) != null &&
                           parsePaise(_amount.text) != null &&
-                          parsePaise(_share.text)! <= parsePaise(_amount.text)!)
+                          parsePaise(_share.text)! <= _available)
                         Text(
-                          'Your share: ${formatMoney(parsePaise(_amount.text)! - parsePaise(_share.text)!)} · Friend owes: ${formatMoney(parsePaise(_share.text)!)}',
+                          'Your share: ${formatMoney(_available - parsePaise(_share.text)!)} · Friend owes: ${formatMoney(parsePaise(_share.text)!)}',
                         ),
                       const SizedBox(height: 16),
                       ReceiptEditor(

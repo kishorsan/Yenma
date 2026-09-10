@@ -95,11 +95,9 @@ mixin SqliteDebtOperations implements DebtRepository {
     MoneyTransaction transaction,
     DebtDraft draft,
   ) async {
-    if (transaction.id != null ||
-        draft.id != null ||
-        transaction.kind != TransactionKind.expense) {
+    if (draft.id != null || transaction.kind != TransactionKind.expense) {
       throw const DebtValidationException(
-        'Create a new expense to use this split.',
+        'Only an expense can have a new friend’s share.',
       );
     }
     await debtDatabase.transaction((db) async {
