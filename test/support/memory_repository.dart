@@ -12,12 +12,15 @@ class MemoryRepository implements MoneyRepository {
         ..sort((a, b) => personNameKey(a).compareTo(personNameKey(b)));
   final List<MoneyTransaction> entries = [];
   String theme = 'system';
+  bool smsConsent = false;
+  bool initialSmsSyncComplete = false;
   bool failSave = false;
   int _id = 0;
   int _debtId = 0;
   int _repaymentId = 0;
   final _debts = <int, DebtDraft>{};
   final _receipts = <int, Uint8List>{};
+  final _transactionReceipts = <int, Uint8List>{};
   final _repayments = <Repayment>[];
   @override
   Future<void> initialize() async {}
@@ -50,9 +53,59 @@ class MemoryRepository implements MoneyRepository {
         categoryId: transaction.categoryId,
         date: transaction.date,
         note: transaction.note,
+        source: transaction.source,
+        bankName: transaction.bankName,
+        externalId: transaction.externalId,
+        recipientKey: transaction.recipientKey,
       ),
     );
+    if (transaction.recipientKey != null) {
+      _recipientCategories[transaction.recipientKey!] = transaction.categoryId;
+    }
   }
+
+  @override
+  Future<int> importTransactions(List<MoneyTransaction> transactions) async {
+    var count = 0;
+    for (final transaction in transactions) {
+      if (transaction.externalId != null &&
+          entries.any((item) => item.externalId == transaction.externalId)) {
+        continue;
+      }
+      await save(transaction);
+      count++;
+    }
+    return count;
+  }
+
+  final Map<String, int> _recipientCategories = {};
+  final Set<String> _syncedDates = {};
+  DateTime? _lastSmsSync;
+  @override
+  Future<int?> categoryForRecipient(String recipientKey) async => _recipientCategories[recipientKey];
+  @override
+  Future<void> saveRecipientCategory(String recipientKey, int categoryId) async => _recipientCategories[recipientKey] = categoryId;
+  @override
+  Future<void> saveTransactionReceipt(int transactionId, Uint8List bytes) async {
+    _transactionReceipts[transactionId] = bytes;
+    final index = entries.indexWhere((entry) => entry.id == transactionId);
+    if (index >= 0) {
+      final entry = entries[index];
+      entries[index] = MoneyTransaction(id: entry.id, title: entry.title, amountPaise: entry.amountPaise, kind: entry.kind, categoryId: entry.categoryId, date: entry.date, note: entry.note, source: entry.source, bankName: entry.bankName, externalId: entry.externalId, recipientKey: entry.recipientKey, hasReceipt: true);
+    }
+  }
+  @override
+  Future<Uint8List?> transactionReceipt(int transactionId) async => _transactionReceipts[transactionId];
+  @override
+  Future<void> deleteTransactionReceipt(int transactionId) async => _transactionReceipts.remove(transactionId);
+  @override
+  Future<bool> wasSyncedOn(DateTime date) async => _syncedDates.contains(dateKey(date));
+  @override
+  Future<void> markSynced(DateTime date) async => _syncedDates.add(dateKey(date));
+  @override
+  Future<DateTime?> lastSmsSyncAt() async => _lastSmsSync;
+  @override
+  Future<void> recordSmsSync({required DateTime completedAt, required int imported, required bool automatic}) async => _lastSmsSync = completedAt;
 
   @override
   Future<void> delete(int id) async {
@@ -65,6 +118,14 @@ class MemoryRepository implements MoneyRepository {
   Future<void> saveTheme(String theme) async {
     this.theme = theme;
   }
+  @override
+  Future<bool> loadSmsConsent() async => smsConsent;
+  @override
+  Future<void> saveSmsConsent(bool granted) async => smsConsent = granted;
+  @override
+  Future<bool> loadInitialSmsSyncComplete() async => initialSmsSyncComplete;
+  @override
+  Future<void> saveInitialSmsSyncComplete() async => initialSmsSyncComplete = true;
 
   @override
   Future<void> close() async {}
@@ -110,6 +171,18 @@ class MemoryRepository implements MoneyRepository {
   ) async {
     await save(transaction);
     await saveDebt(draft.linkedTo(entries.last.id!));
+  }
+  @override
+  Future<int> saveSharedExpenses(
+    MoneyTransaction transaction,
+    List<DebtDraft> drafts,
+  ) async {
+    await save(transaction);
+    final id = entries.last.id!;
+    for (final draft in drafts) {
+      await saveDebt(draft.linkedTo(id));
+    }
+    return id;
   }
 
   @override

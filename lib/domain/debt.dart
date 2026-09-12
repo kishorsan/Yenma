@@ -130,6 +130,7 @@ abstract interface class DebtRepository {
   Future<List<DebtRecord>> debts();
   Future<void> saveDebt(DebtDraft draft);
   Future<void> saveSharedExpense(MoneyTransaction transaction, DebtDraft draft);
+  Future<int> saveSharedExpenses(MoneyTransaction transaction, List<DebtDraft> drafts);
   Future<void> deleteDebt(int id);
   Future<Uint8List?> debtReceipt(int id);
   Future<List<Repayment>> repayments(int debtId);

@@ -251,7 +251,7 @@ class _DebtFormState extends State<DebtForm> {
                   ),
                 ),
                 const SizedBox(height: 12),
-                ReceiptEditor(
+                  if (widget.transaction == null) ReceiptEditor(
                   source: widget.controller.receipts,
                   bytes: _receipt,
                   hasSavedReceipt:

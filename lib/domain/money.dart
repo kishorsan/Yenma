@@ -74,6 +74,11 @@ class MoneyTransaction {
     required this.categoryId,
     required this.date,
     this.note = '',
+    this.source = 'MANUAL',
+    this.bankName,
+    this.externalId,
+    this.recipientKey,
+    this.hasReceipt = false,
   });
   final int? id;
   final String title;
@@ -82,6 +87,11 @@ class MoneyTransaction {
   final int categoryId;
   final DateTime date;
   final String note;
+  final String source;
+  final String? bankName;
+  final String? externalId;
+  final String? recipientKey;
+  final bool hasReceipt;
 
   Map<String, Object?> toRow() => {
     if (id != null) 'id': id,
@@ -91,6 +101,10 @@ class MoneyTransaction {
     'category_id': categoryId,
     'date': dateKey(date),
     'note': note.trim(),
+    'source': source,
+    'bank_name': bankName,
+    'external_id': externalId,
+    'recipient_key': recipientKey,
   };
 
   factory MoneyTransaction.fromRow(Map<String, Object?> row) =>
@@ -102,6 +116,11 @@ class MoneyTransaction {
         categoryId: row['category_id'] as int,
         date: DateTime.parse(row['date'] as String),
         note: row['note'] as String,
+        source: (row['source'] as String?) ?? 'MANUAL',
+        bankName: row['bank_name'] as String?,
+        externalId: row['external_id'] as String?,
+        recipientKey: row['recipient_key'] as String?,
+        hasReceipt: row['has_receipt'] == 1,
       );
 }
 

@@ -61,6 +61,7 @@ The database is `yenma.db`, schema version 3, in the app's private database dire
 
 ## Documentation
 
+- [Current Flutter features, use cases, and problems solved](docs/flutter-features.md) — source-reviewed inventory, platform limits, and questions about product intent.
 - [Reference documentation](docs/money-mobile-application/README.md)
 - [Implementation status and remaining work](docs/money-mobile-application/implementation_status.md)
 - [Flutter implementation plan](docs/money-mobile-application/implementation.md)

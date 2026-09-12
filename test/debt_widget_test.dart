@@ -84,6 +84,7 @@ void main() {
       );
       await tester.tap(find.text('Debts'));
       await tester.pumpAndSettle();
+      await tap(tester, 'Arun');
       await tap(tester, 'Dinner split');
       expect(find.text('Pay whenever you can'), findsOneWidget);
       await tap(tester, 'Record repayment');
@@ -99,6 +100,7 @@ void main() {
       await tester.pageBack();
       await tester.pumpAndSettle();
       await tap(tester, 'Settled');
+      await tap(tester, 'Arun');
       expect(find.text('Dinner split'), findsOneWidget);
     },
   );

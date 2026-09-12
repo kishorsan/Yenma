@@ -18,6 +18,7 @@ class DebtsScreen extends StatefulWidget {
 class _DebtsScreenState extends State<DebtsScreen> {
   bool _settled = false;
   String _query = '';
+  final Set<String> _expandedPeople = <String>{};
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.controller,
@@ -199,86 +200,104 @@ class _DebtsScreenState extends State<DebtsScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            debts.first.person,
-                            style: Theme.of(context).textTheme.titleLarge
-                                ?.copyWith(fontWeight: FontWeight.bold),
-                          ),
-                          if (!_settled)
-                            Text(
-                              [
-                                if (owed > 0) 'Owes you ${formatMoney(owed)}',
-                                if (owing > 0) 'You owe ${formatMoney(owing)}',
-                              ].join(' · '),
+                          InkWell(
+                            borderRadius: BorderRadius.circular(12),
+                            onTap: () => setState(() {
+                              if (!_expandedPeople.add(person)) {
+                                _expandedPeople.remove(person);
+                              }
+                            }),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      debts.first.person,
+                                      style: Theme.of(context).textTheme.titleLarge
+                                          ?.copyWith(fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      if (owed > 0)
+                                        Text('Owes you ${formatMoney(owed)}'),
+                                      if (owing > 0)
+                                        Text('You owe ${formatMoney(owing)}'),
+                                      if (owed == 0 && owing == 0)
+                                        const Text('Settled'),
+                                    ],
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Icon(
+                                    _expandedPeople.contains(person)
+                                        ? Icons.expand_less
+                                        : Icons.expand_more,
+                                  ),
+                                ],
+                              ),
                             ),
+                          ),
                           if (_query.isNotEmpty)
-                            const Text('Totals reflect search results'),
-                          if (!_settled && owed > 0)
-                            TextButton.icon(
-                              icon: const Icon(Icons.copy_outlined),
-                              label: const Text('Copy reminder'),
-                              onPressed: () async {
-                                final total = controller.debts
-                                    .where(
-                                      (debt) =>
-                                          debt.personKey == person &&
-                                          debt.direction ==
-                                              DebtDirection.owedToMe,
-                                    )
-                                    .fold(
-                                      0,
-                                      (sum, debt) => sum + debt.remainingPaise,
-                                    );
-                                try {
-                                  await Clipboard.setData(
-                                    ClipboardData(
+                            const Padding(
+                              padding: EdgeInsets.only(top: 8),
+                              child: Text('Totals reflect search results'),
+                            ),
+                          if (_expandedPeople.contains(person)) ...[
+                            if (!_settled && owed > 0)
+                              TextButton.icon(
+                                icon: const Icon(Icons.copy_outlined),
+                                label: const Text('Copy reminder'),
+                                onPressed: () async {
+                                  final total = controller.debts
+                                      .where(
+                                        (debt) =>
+                                            debt.personKey == person &&
+                                            debt.direction == DebtDirection.owedToMe,
+                                      )
+                                      .fold(0, (sum, debt) => sum + debt.remainingPaise);
+                                  try {
+                                    await Clipboard.setData(ClipboardData(
                                       text:
                                           'Hi ${debts.first.person}, just a reminder that ${formatMoney(total)} is pending for the payments I covered. Please pay me back when you can. Thanks!',
-                                    ),
-                                  );
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Reminder copied. You can share it when you’re ready.',
-                                        ),
-                                      ),
-                                    );
+                                    ));
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Reminder copied. You can share it when you’re ready.')),
+                                      );
+                                    }
+                                  } catch (_) {
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Could not copy the reminder. Please retry.')),
+                                      );
+                                    }
                                   }
-                                } catch (_) {
-                                  if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(
-                                        content: Text(
-                                          'Could not copy the reminder. Please retry.',
-                                        ),
-                                      ),
-                                    );
-                                  }
-                                }
-                              },
-                            ),
-                          const Divider(),
-                          ...debts.map(
-                            (debt) => ListTile(
-                              contentPadding: EdgeInsets.zero,
-                              title: Text(debt.title),
-                              subtitle: Text(
-                                '${debt.direction.label} · ${DateFormat.MMMd().format(debt.date)}${debt.hasReceipt ? ' · Screenshot' : ''}\n${debt.isSettled ? 'Settled' : '${formatMoney(debt.remainingPaise)} remaining'}',
+                                },
                               ),
-                              isThreeLine: true,
-                              trailing: const Icon(Icons.chevron_right),
-                              onTap: () => Navigator.push(
-                                context,
-                                MaterialPageRoute<void>(
-                                  builder: (_) => DebtDetail(
-                                    controller: controller,
-                                    debtId: debt.id,
+                            const Divider(),
+                            ...debts.map(
+                              (debt) => ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                title: Text(debt.title),
+                                subtitle: Text(
+                                  '${debt.direction.label} · ${DateFormat.MMMd().format(debt.date)}${debt.hasReceipt ? ' · Screenshot' : ''}\n${debt.isSettled ? 'Settled' : '${formatMoney(debt.remainingPaise)} remaining'}',
+                                ),
+                                isThreeLine: true,
+                                trailing: const Icon(Icons.chevron_right),
+                                onTap: () => Navigator.push(
+                                  context,
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => DebtDetail(
+                                      controller: controller,
+                                      debtId: debt.id,
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
+                          ],
                         ],
                       ),
                     ),

@@ -4,10 +4,31 @@ import 'package:intl/intl.dart';
 import '../app/money_controller.dart';
 import '../app/theme.dart';
 import '../domain/money.dart';
+import '../domain/debt.dart';
 import 'transaction_form.dart';
 import 'transaction_detail.dart';
 import 'debts/debts_screen.dart';
 import 'debts/debt_form.dart';
+
+class _YenmaDestination {
+  const _YenmaDestination(this.icon, this.selectedIcon, this.label);
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+
+  NavigationDestination get navigation => NavigationDestination(
+    icon: Icon(icon),
+    selectedIcon: Icon(selectedIcon),
+    label: label,
+  );
+}
+
+const _yenmaDestinations = <_YenmaDestination>[
+  _YenmaDestination(Icons.grid_view_outlined, Icons.grid_view_rounded, 'Overview'),
+  _YenmaDestination(Icons.receipt_long_outlined, Icons.receipt_long, 'Transactions'),
+  _YenmaDestination(Icons.handshake_outlined, Icons.handshake, 'Debts'),
+  _YenmaDestination(Icons.tune_outlined, Icons.tune, 'Settings'),
+];
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.controller});
@@ -47,6 +68,64 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     ),
   );
 
+  Future<void> _syncWithConsent() async {
+    if (!controller.smsConsentGranted) {
+      final allowed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Allow message access?'),
+          content: const Text(
+            'Yenma will read transaction messages from your device only when you sync. '
+            'Messages stay on this device and are used to create transaction entries. '
+            'You can deny the Android permission or stop using message sync at any time.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Not now')),
+            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Continue')),
+          ],
+        ),
+      );
+      if (allowed != true || !mounted) return;
+      await controller.grantSmsConsent();
+    }
+    await controller.syncMessages();
+    if (!mounted || controller.syncMessage == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(controller.syncMessage!)));
+  }
+
+  Future<void> _deleteWithUndo(MoneyTransaction transaction) async {
+    try {
+      await controller.delete(transaction.id!);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Transaction deleted'),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () async {
+              try {
+                await controller.restore(transaction);
+              } catch (_) {
+                if (mounted) ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Could not undo the deletion')),
+                );
+              }
+            },
+          ),
+        ),
+      );
+    } catch (error) {
+      await controller.loadMonth(controller.month);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(error is DebtValidationException
+            ? error.message
+            : 'Could not delete. Please try again.'),
+      ));
+    }
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: controller,
@@ -85,6 +164,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
           actions: [
+            if (_tab != 3)
+              IconButton(
+                tooltip: 'Sync bank messages',
+                onPressed: controller.syncing
+                    ? null
+                    : _syncWithConsent,
+                icon: controller.syncing
+                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.sync),
+              ),
             if (_tab == 3)
               Padding(
                 padding: const EdgeInsets.only(right: 20),
@@ -96,23 +185,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               ),
           ],
         ),
-        body: controller.initializing
-            ? const Center(child: CircularProgressIndicator())
-            : !ready
-            ? _failure(
-                controller.error ?? 'Unable to open your data',
-                controller.initialize,
-              )
-            : Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 840),
-                  child: _tab == 3
-                      ? _settings()
-                      : _tab == 2
-                      ? DebtsScreen(controller: controller)
-                      : _ledger(),
-                ),
-              ),
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            final content = controller.initializing
+                ? const Center(child: CircularProgressIndicator())
+                : !ready
+                    ? _failure(controller.error ?? 'Unable to open your data', controller.initialize)
+                    : Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 840),
+                          child: _tab == 3
+                              ? _settings()
+                              : _tab == 2
+                                  ? DebtsScreen(controller: controller)
+                                  : _ledger(),
+                        ),
+                      );
+            if (constraints.maxWidth < 700) return content;
+            return Row(
+              children: [
+                _navigationRail(),
+                Expanded(child: content),
+              ],
+            );
+          },
+        ),
         floatingActionButton: ready && _tab != 3
             ? FloatingActionButton.extended(
                 onPressed: _tab == 2
@@ -127,31 +224,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 label: Text(_tab == 2 ? 'Add debt' : 'Add transaction'),
               )
             : null,
-        bottomNavigationBar: NavigationBar(
+        bottomNavigationBar: MediaQuery.sizeOf(context).width < 700
+            ? NavigationBar(
           selectedIndex: _tab,
           onDestinationSelected: (value) => setState(() => _tab = value),
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.grid_view_outlined),
-              selectedIcon: Icon(Icons.grid_view_rounded),
-              label: 'Overview',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.receipt_long_outlined),
-              selectedIcon: Icon(Icons.receipt_long),
-              label: 'Transactions',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.handshake_outlined),
-              selectedIcon: Icon(Icons.handshake),
-              label: 'Debts',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.tune_outlined),
-              label: 'Settings',
-            ),
-          ],
-        ),
+          destinations: _yenmaDestinations.map((destination) => destination.navigation).toList(),
+              )
+            : null,
       );
     },
   );
@@ -170,6 +249,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ],
       ),
     ),
+  );
+
+  Widget _navigationRail() => NavigationRail(
+    selectedIndex: _tab,
+    onDestinationSelected: (value) => setState(() => _tab = value),
+    labelType: NavigationRailLabelType.all,
+    destinations: _yenmaDestinations.map((destination) => NavigationRailDestination(
+      icon: destination.navigation.icon,
+      selectedIcon: destination.navigation.selectedIcon,
+      label: Text(destination.label),
+    )).toList(),
   );
 
   Widget _ledger() {
@@ -490,7 +580,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _transactionTile(MoneyTransaction transaction) {
     final category = controller.category(transaction.categoryId);
     final color = kindColor(transaction.kind, Theme.of(context).brightness);
-    return Card(
+    final tile = Card(
       child: InkWell(
         borderRadius: BorderRadius.circular(24),
         onTap: () => Navigator.push(
@@ -550,6 +640,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ),
       ),
+    );
+    if (_tab != 1) return tile;
+    return Dismissible(
+      key: ValueKey('transaction-${transaction.id}'),
+      direction: DismissDirection.endToStart,
+      background: const SizedBox.shrink(),
+      secondaryBackground: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.errorContainer,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.onErrorContainer),
+      ),
+      onDismissed: (_) => _deleteWithUndo(transaction),
+      child: tile,
     );
   }
 

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'dart:typed_data';
 import 'package:intl/intl.dart';
 
 import '../app/money_controller.dart';
@@ -116,9 +117,11 @@ class _TransactionDetailState extends State<TransactionDetail> {
                           DateFormat.yMMMMd().format(transaction.date),
                         ),
                       ),
-                      const ListTile(
-                        title: Text('Source'),
-                        subtitle: Text('Manual entry · INR'),
+                      ListTile(
+                        title: const Text('Source'),
+                        subtitle: Text(transaction.source == 'SMS'
+                            ? '${transaction.bankName ?? 'Bank'} · Imported from messages · INR'
+                            : 'Cash · Manual entry · INR'),
                       ),
                       if (transaction.note.isNotEmpty)
                         ListTile(
@@ -128,6 +131,26 @@ class _TransactionDetailState extends State<TransactionDetail> {
                     ],
                   ),
                 ),
+                if (transaction.hasReceipt)
+                  FutureBuilder<Uint8List?>(
+                    future: widget.controller.repository.transactionReceipt(transaction.id!),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) return const SizedBox.shrink();
+                      return Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const ListTile(
+                              leading: Icon(Icons.receipt_long_outlined),
+                              title: Text('Bill attached'),
+                            ),
+                            Image.memory(snapshot.data!, fit: BoxFit.contain),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
                 const SizedBox(height: 24),
                 if (transaction.kind == TransactionKind.expense)
                   ListenableBuilder(

@@ -106,6 +106,23 @@ mixin SqliteDebtOperations implements DebtRepository {
     });
   }
 
+  @override
+  Future<int> saveSharedExpenses(
+    MoneyTransaction transaction,
+    List<DebtDraft> drafts,
+  ) async {
+    if (drafts.isEmpty || transaction.kind != TransactionKind.expense) {
+      throw const DebtValidationException('Add at least one friend share to split this expense.');
+    }
+    return debtDatabase.transaction<int>((db) async {
+      final id = await writeTransaction(db, transaction);
+      for (final draft in drafts) {
+        await _writeDebt(db, draft.linkedTo(id));
+      }
+      return id;
+    });
+  }
+
   Future<void> _writeDebt(DatabaseExecutor db, DebtDraft draft) async {
     if (draft.person.trim().isEmpty ||
         draft.person.trim().length > 80 ||
