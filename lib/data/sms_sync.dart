@@ -10,19 +10,20 @@ class BankSms {
 }
 
 class SmsSyncResult {
-  const SmsSyncResult(this.imported, this.scanned);
+  const SmsSyncResult(this.imported, this.scanned, this.timestamp);
   final int imported;
   final int scanned;
+  final DateTime timestamp;
 }
 
 class SmsParser {
   static const bankNames = <String, String>{
     'HDFC': 'HDFC Bank', 
-    'CNRB': 'Canara Bank', 
+    'CANB': 'Canara Bank', 
     'JPTR': 'Jupiter',
     'ICICI': 'ICICI Bank', 
     'SBI': 'SBI', 
-    'AXIS': 'Axis Bank',
+    'AXS': 'Axis Bank',
     'KOTAK': 'Kotak Mahindra Bank', 
     'IDFC': 'IDFC FIRST Bank',
     'BOI': 'Bank of India', 

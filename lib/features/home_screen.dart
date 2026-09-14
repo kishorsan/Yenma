@@ -484,7 +484,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     : TransactionKind.income,
               ),
             ];
-            return constraints.maxWidth < 360 ||
+            return constraints.maxWidth < 320 ||
                     MediaQuery.textScalerOf(context).scale(1) > 1.4
                 ? Column(
                     children: [cards[0], const SizedBox(height: 12), cards[1]],
