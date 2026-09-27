@@ -33,8 +33,7 @@ class _TransactionFormState extends State<TransactionForm> {
   late final _note = TextEditingController(text: widget.transaction?.note);
   late TransactionKind _kind =
       widget.transaction?.kind ?? TransactionKind.expense;
-  late DateTime _date =
-      widget.transaction?.date ?? calendarDate(DateTime.now());
+  late DateTime _date = widget.transaction?.date ?? _todayAtNoon();
   late int? _categoryId = widget.transaction?.categoryId;
   bool _saving = false;
   String? _error;
@@ -45,6 +44,11 @@ class _TransactionFormState extends State<TransactionForm> {
   bool _split = false;
   bool _picking = false;
   Uint8List? _receipt;
+  static DateTime _todayAtNoon() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day, 12);
+  }
+
   int get _allocated => widget.transaction?.id == null
       ? 0
       : widget.controller
@@ -52,8 +56,12 @@ class _TransactionFormState extends State<TransactionForm> {
             .fold(0, (sum, debt) => sum + debt.amountPaise);
   int get _newAllocated =>
       (parsePaise(_share.text) ?? 0) +
-      _additionalShares.fold(0, (sum, field) => sum + (parsePaise(field.text) ?? 0));
-  int get _available => (parsePaise(_amount.text) ?? 0) - _allocated - _newAllocated;
+      _additionalShares.fold(
+        0,
+        (sum, field) => sum + (parsePaise(field.text) ?? 0),
+      );
+  int get _available =>
+      (parsePaise(_amount.text) ?? 0) - _allocated - _newAllocated;
   @override
   void initState() {
     super.initState();
@@ -64,6 +72,7 @@ class _TransactionFormState extends State<TransactionForm> {
       });
     }
   }
+
   @override
   void dispose() {
     _title.dispose();
@@ -71,7 +80,9 @@ class _TransactionFormState extends State<TransactionForm> {
     _note.dispose();
     _friend.dispose();
     _share.dispose();
-    for (final field in [..._additionalFriends, ..._additionalShares]) field.dispose();
+    for (final field in [..._additionalFriends, ..._additionalShares]) {
+      field.dispose();
+    }
     super.dispose();
   }
 
@@ -97,11 +108,29 @@ class _TransactionFormState extends State<TransactionForm> {
       );
       if (_split && _kind == TransactionKind.expense) {
         final drafts = <DebtDraft>[
-          DebtDraft(person: _friend.text, title: _title.text, amountPaise: parsePaise(_share.text)!, direction: DebtDirection.owedToMe, date: _date, note: _note.text),
+          DebtDraft(
+            person: _friend.text,
+            title: _title.text,
+            amountPaise: parsePaise(_share.text)!,
+            direction: DebtDirection.owedToMe,
+            date: _date,
+            note: _note.text,
+          ),
           for (var i = 0; i < _additionalFriends.length; i++)
-            DebtDraft(person: _additionalFriends[i].text, title: _title.text, amountPaise: parsePaise(_additionalShares[i].text)!, direction: DebtDirection.owedToMe, date: _date, note: _note.text),
+            DebtDraft(
+              person: _additionalFriends[i].text,
+              title: _title.text,
+              amountPaise: parsePaise(_additionalShares[i].text)!,
+              direction: DebtDirection.owedToMe,
+              date: _date,
+              note: _note.text,
+            ),
         ];
-        await widget.controller.saveSharedExpenses(transaction, drafts, receipt: _receipt);
+        await widget.controller.saveSharedExpenses(
+          transaction,
+          drafts,
+          receipt: _receipt,
+        );
       } else {
         await widget.controller.save(transaction, receipt: _receipt);
       }
@@ -223,7 +252,29 @@ class _TransactionFormState extends State<TransactionForm> {
                       leading: const Icon(Icons.calendar_today_outlined),
                       title: const Text('Date'),
                       subtitle: Text(DateFormat.yMMMMd().format(_date)),
-                      trailing: const Icon(Icons.chevron_right),
+                      trailing: TextButton.icon(
+                        onPressed: _saving
+                            ? null
+                            : () async {
+                                final selected = await showTimePicker(
+                                  context: context,
+                                  initialTime: TimeOfDay.fromDateTime(_date),
+                                );
+                                if (selected != null && mounted) {
+                                  setState(() {
+                                    _date = DateTime(
+                                      _date.year,
+                                      _date.month,
+                                      _date.day,
+                                      selected.hour,
+                                      selected.minute,
+                                    );
+                                  });
+                                }
+                              },
+                        icon: const Icon(Icons.schedule, size: 18),
+                        label: Text(DateFormat.jm().format(_date)),
+                      ),
                       onTap: _saving
                           ? null
                           : () async {
@@ -234,7 +285,15 @@ class _TransactionFormState extends State<TransactionForm> {
                                 lastDate: DateTime(2100, 12, 31),
                               );
                               if (selected != null && mounted) {
-                                setState(() => _date = selected);
+                                setState(() {
+                                  _date = DateTime(
+                                    selected.year,
+                                    selected.month,
+                                    selected.day,
+                                    _date.hour,
+                                    _date.minute,
+                                  );
+                                });
                               }
                             },
                     ),
@@ -303,7 +362,9 @@ class _TransactionFormState extends State<TransactionForm> {
                           final total = parsePaise(_amount.text);
                           return share == null ||
                                   total == null ||
-                                  share > _available + (parsePaise(_share.text) ?? 0)
+                                  share >
+                                      _available +
+                                          (parsePaise(_share.text) ?? 0)
                               ? 'Enter a share no larger than the unallocated amount'
                               : null;
                         },
@@ -320,7 +381,8 @@ class _TransactionFormState extends State<TransactionForm> {
                                   enabled: !_saving,
                                   people: widget.controller.people,
                                   label: 'Friend ${index + 2}',
-                                  validator: (value) => value == null || value.trim().isEmpty
+                                  validator: (value) =>
+                                      value == null || value.trim().isEmpty
                                       ? 'Enter a friend’s name'
                                       : null,
                                 ),
@@ -331,20 +393,33 @@ class _TransactionFormState extends State<TransactionForm> {
                                 child: TextFormField(
                                   controller: _additionalShares[index],
                                   enabled: !_saving,
-                                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                  decoration: const InputDecoration(labelText: 'Share', prefixText: '₹ '),
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                        decimal: true,
+                                      ),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Share',
+                                    prefixText: '₹ ',
+                                  ),
                                   onChanged: (_) => setState(() {}),
-                                  validator: (value) => parsePaise(value ?? '') == null
+                                  validator: (value) =>
+                                      parsePaise(value ?? '') == null
                                       ? 'Enter a valid share'
                                       : null,
                                 ),
                               ),
                               IconButton(
                                 tooltip: 'Remove friend',
-                                onPressed: _saving ? null : () => setState(() {
-                                  _additionalFriends.removeAt(index).dispose();
-                                  _additionalShares.removeAt(index).dispose();
-                                }),
+                                onPressed: _saving
+                                    ? null
+                                    : () => setState(() {
+                                        _additionalFriends
+                                            .removeAt(index)
+                                            .dispose();
+                                        _additionalShares
+                                            .removeAt(index)
+                                            .dispose();
+                                      }),
                                 icon: const Icon(Icons.close),
                               ),
                             ],
@@ -357,8 +432,12 @@ class _TransactionFormState extends State<TransactionForm> {
                           onPressed: _saving || _available <= 0
                               ? null
                               : () => setState(() {
-                                  _additionalFriends.add(TextEditingController());
-                                  _additionalShares.add(TextEditingController());
+                                  _additionalFriends.add(
+                                    TextEditingController(),
+                                  );
+                                  _additionalShares.add(
+                                    TextEditingController(),
+                                  );
                                 }),
                           icon: const Icon(Icons.person_add_alt),
                           label: const Text('Add another person'),
@@ -371,9 +450,14 @@ class _TransactionFormState extends State<TransactionForm> {
                               ? null
                               : () {
                                   final half =
-                                      ((_available + (parsePaise(_share.text) ?? 0)) > 0
-                                              ? _available + (parsePaise(_share.text) ?? 0)
-                                              : 0) ~/ 2;
+                                      ((_available +
+                                                  (parsePaise(_share.text) ??
+                                                      0)) >
+                                              0
+                                          ? _available +
+                                                (parsePaise(_share.text) ?? 0)
+                                          : 0) ~/
+                                      2;
                                   setState(
                                     () => _share.text =
                                         '${half ~/ 100}.${(half % 100).toString().padLeft(2, '0')}',
@@ -388,7 +472,8 @@ class _TransactionFormState extends State<TransactionForm> {
                       ),
                       if (parsePaise(_share.text) != null &&
                           parsePaise(_amount.text) != null &&
-                          parsePaise(_share.text)! <= _available + (parsePaise(_share.text) ?? 0))
+                          parsePaise(_share.text)! <=
+                              _available + (parsePaise(_share.text) ?? 0))
                         Text(
                           'Your share: ${formatMoney(_available - parsePaise(_share.text)!)} · Friend owes: ${formatMoney(parsePaise(_share.text)!)}',
                         ),

@@ -9,6 +9,7 @@ import 'transaction_form.dart';
 import 'transaction_detail.dart';
 import 'debts/debts_screen.dart';
 import 'debts/debt_form.dart';
+import 'bulk_categorization_screen.dart';
 
 class _YenmaDestination {
   const _YenmaDestination(this.icon, this.selectedIcon, this.label);
@@ -24,8 +25,16 @@ class _YenmaDestination {
 }
 
 const _yenmaDestinations = <_YenmaDestination>[
-  _YenmaDestination(Icons.grid_view_outlined, Icons.grid_view_rounded, 'Overview'),
-  _YenmaDestination(Icons.receipt_long_outlined, Icons.receipt_long, 'Transactions'),
+  _YenmaDestination(
+    Icons.grid_view_outlined,
+    Icons.grid_view_rounded,
+    'Overview',
+  ),
+  _YenmaDestination(
+    Icons.receipt_long_outlined,
+    Icons.receipt_long,
+    'Transactions',
+  ),
   _YenmaDestination(Icons.handshake_outlined, Icons.handshake, 'Debts'),
   _YenmaDestination(Icons.tune_outlined, Icons.tune, 'Settings'),
 ];
@@ -80,8 +89,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             'You can deny the Android permission or stop using message sync at any time.',
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Not now')),
-            FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Continue')),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Not now'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Continue'),
+            ),
           ],
         ),
       );
@@ -90,7 +105,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     }
     await controller.syncMessages();
     if (!mounted || controller.syncMessage == null) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(controller.syncMessage!)));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(controller.syncMessage!)));
   }
 
   Future<void> _deleteWithUndo(MoneyTransaction transaction) async {
@@ -107,9 +123,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               try {
                 await controller.restore(transaction);
               } catch (_) {
-                if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Could not undo the deletion')),
-                );
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Could not undo the deletion'),
+                    ),
+                  );
+                }
               }
             },
           ),
@@ -118,11 +138,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     } catch (error) {
       await controller.loadMonth(controller.month);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(error is DebtValidationException
-            ? error.message
-            : 'Could not delete. Please try again.'),
-      ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error is DebtValidationException
+                ? error.message
+                : 'Could not delete. Please try again.',
+          ),
+        ),
+      );
     }
   }
 
@@ -164,14 +188,29 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
           actions: [
+            if (_tab == 0 || _tab == 1)
+              IconButton(
+                tooltip: 'Categorize transactions',
+                onPressed: ready
+                    ? () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) =>
+                              BulkCategorizationScreen(controller: controller),
+                        ),
+                      )
+                    : null,
+                icon: const Icon(Icons.category_outlined),
+              ),
             if (_tab != 3)
               IconButton(
                 tooltip: 'Sync bank messages',
-                onPressed: controller.syncing
-                    ? null
-                    : _syncWithConsent,
+                onPressed: controller.syncing ? null : _syncWithConsent,
                 icon: controller.syncing
-                    ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : const Icon(Icons.sync),
               ),
             if (_tab == 3)
@@ -190,17 +229,20 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             final content = controller.initializing
                 ? const Center(child: CircularProgressIndicator())
                 : !ready
-                    ? _failure(controller.error ?? 'Unable to open your data', controller.initialize)
-                    : Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 840),
-                          child: _tab == 3
-                              ? _settings()
-                              : _tab == 2
-                                  ? DebtsScreen(controller: controller)
-                                  : _ledger(),
-                        ),
-                      );
+                ? _failure(
+                    controller.error ?? 'Unable to open your data',
+                    controller.initialize,
+                  )
+                : Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 840),
+                      child: _tab == 3
+                          ? _settings()
+                          : _tab == 2
+                          ? DebtsScreen(controller: controller)
+                          : _ledger(),
+                    ),
+                  );
             if (constraints.maxWidth < 700) return content;
             return Row(
               children: [
@@ -226,9 +268,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             : null,
         bottomNavigationBar: MediaQuery.sizeOf(context).width < 700
             ? NavigationBar(
-          selectedIndex: _tab,
-          onDestinationSelected: (value) => setState(() => _tab = value),
-          destinations: _yenmaDestinations.map((destination) => destination.navigation).toList(),
+                selectedIndex: _tab,
+                onDestinationSelected: (value) => setState(() => _tab = value),
+                destinations: _yenmaDestinations
+                    .map((destination) => destination.navigation)
+                    .toList(),
               )
             : null,
       );
@@ -255,11 +299,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     selectedIndex: _tab,
     onDestinationSelected: (value) => setState(() => _tab = value),
     labelType: NavigationRailLabelType.all,
-    destinations: _yenmaDestinations.map((destination) => NavigationRailDestination(
-      icon: destination.navigation.icon,
-      selectedIcon: destination.navigation.selectedIcon,
-      label: Text(destination.label),
-    )).toList(),
+    destinations: _yenmaDestinations
+        .map(
+          (destination) => NavigationRailDestination(
+            icon: destination.navigation.icon,
+            selectedIcon: destination.navigation.selectedIcon,
+            label: Text(destination.label),
+          ),
+        )
+        .toList(),
   );
 
   Widget _ledger() {
@@ -621,7 +669,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${category.name} · ${DateFormat.MMMd().format(transaction.date)}',
+                      '${category.name} · ${DateFormat.MMMd().add_jm().format(transaction.date)}',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     const SizedBox(height: 6),
@@ -653,7 +701,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           color: Theme.of(context).colorScheme.errorContainer,
           borderRadius: BorderRadius.circular(24),
         ),
-        child: Icon(Icons.delete_outline, color: Theme.of(context).colorScheme.onErrorContainer),
+        child: Icon(
+          Icons.delete_outline,
+          color: Theme.of(context).colorScheme.onErrorContainer,
+        ),
       ),
       onDismissed: (_) => _deleteWithUndo(transaction),
       child: tile,

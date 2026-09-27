@@ -71,5 +71,9 @@ IconData categoryIcon(String key) => switch (key) {
   'account_balance' => Icons.account_balance_outlined,
   'trending_up' => Icons.trending_up,
   'swap_horiz' => Icons.swap_horiz_rounded,
+  'home' => Icons.home_outlined,
+  'call_received' => Icons.call_received_rounded,
+  'account_balance_wallet' => Icons.account_balance_wallet_outlined,
+  'savings' => Icons.savings_outlined,
   _ => Icons.more_horiz,
 };

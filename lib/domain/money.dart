@@ -27,8 +27,33 @@ String formatMoney(int paise) {
 
 String dateKey(DateTime date) =>
     '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+String dateTimeKey(DateTime date) =>
+    '${dateKey(date)}T${date.hour.toString().padLeft(2, '0')}:'
+    '${date.minute.toString().padLeft(2, '0')}:'
+    '${date.second.toString().padLeft(2, '0')}.'
+    '${date.millisecond.toString().padLeft(3, '0')}';
+
+DateTime parseTransactionDate(String value) {
+  final parsed = DateTime.parse(value);
+  return value.contains('T') || value.contains(' ')
+      ? parsed
+      : DateTime(parsed.year, parsed.month, parsed.day, 12);
+}
+
 DateTime calendarDate(DateTime date) =>
     DateTime(date.year, date.month, date.day);
+
+String transactionNameKey(String value) =>
+    value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+Iterable<MoneyTransaction> transactionsMatchingName(
+  Iterable<MoneyTransaction> candidates,
+  MoneyTransaction target,
+) => candidates.where(
+  (candidate) =>
+      candidate.kind == target.kind &&
+      transactionNameKey(candidate.title) == transactionNameKey(target.title),
+);
 
 class MoneyCategory {
   const MoneyCategory(this.id, this.name, this.icon, this.color, this.kinds);
@@ -63,6 +88,12 @@ const defaultCategories = <MoneyCategory>[
     TransactionKind.expense,
     TransactionKind.income,
   }),
+  MoneyCategory(14, 'Rent', 'home', 0xFF7C6CF2, _expense),
+  MoneyCategory(15, 'Received', 'call_received', 0xFF20BF6B, {
+    TransactionKind.income,
+  }),
+  MoneyCategory(16, 'Wallet', 'account_balance_wallet', 0xFFF7B731, _expense),
+  MoneyCategory(17, 'Savings', 'savings', 0xFF2D98DA, _expense),
 ];
 
 class MoneyTransaction {
@@ -99,7 +130,7 @@ class MoneyTransaction {
     'amount_paise': amountPaise,
     'kind': kind.name,
     'category_id': categoryId,
-    'date': dateKey(date),
+    'date': dateTimeKey(date),
     'note': note.trim(),
     'source': source,
     'bank_name': bankName,
@@ -114,7 +145,7 @@ class MoneyTransaction {
         amountPaise: row['amount_paise'] as int,
         kind: TransactionKind.values.byName(row['kind'] as String),
         categoryId: row['category_id'] as int,
-        date: DateTime.parse(row['date'] as String),
+        date: parseTransactionDate(row['date'] as String),
         note: row['note'] as String,
         source: (row['source'] as String?) ?? 'MANUAL',
         bankName: row['bank_name'] as String?,

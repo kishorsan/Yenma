@@ -65,6 +65,35 @@ class MemoryRepository implements MoneyRepository {
   }
 
   @override
+  Future<void> bulkCategorize(
+    List<MoneyTransaction> transactions,
+    int categoryId,
+  ) async {
+    final ids = transactions.map((transaction) => transaction.id).toSet();
+    for (var index = 0; index < entries.length; index++) {
+      final entry = entries[index];
+      if (!ids.contains(entry.id)) continue;
+      entries[index] = MoneyTransaction(
+        id: entry.id,
+        title: entry.title,
+        amountPaise: entry.amountPaise,
+        kind: entry.kind,
+        categoryId: categoryId,
+        date: entry.date,
+        note: entry.note,
+        source: entry.source,
+        bankName: entry.bankName,
+        externalId: entry.externalId,
+        recipientKey: entry.recipientKey,
+        hasReceipt: entry.hasReceipt,
+      );
+      if (entry.recipientKey != null) {
+        _recipientCategories[entry.recipientKey!] = categoryId;
+      }
+    }
+  }
+
+  @override
   Future<int> importTransactions(List<MoneyTransaction> transactions) async {
     var count = 0;
     for (final transaction in transactions) {
@@ -82,30 +111,59 @@ class MemoryRepository implements MoneyRepository {
   final Set<String> _syncedDates = {};
   DateTime? _lastSmsSync;
   @override
-  Future<int?> categoryForRecipient(String recipientKey) async => _recipientCategories[recipientKey];
+  Future<int?> categoryForRecipient(String recipientKey) async =>
+      _recipientCategories[recipientKey];
   @override
-  Future<void> saveRecipientCategory(String recipientKey, int categoryId) async => _recipientCategories[recipientKey] = categoryId;
+  Future<void> saveRecipientCategory(
+    String recipientKey,
+    int categoryId,
+  ) async => _recipientCategories[recipientKey] = categoryId;
   @override
-  Future<void> saveTransactionReceipt(int transactionId, Uint8List bytes) async {
+  Future<void> saveTransactionReceipt(
+    int transactionId,
+    Uint8List bytes,
+  ) async {
     _transactionReceipts[transactionId] = bytes;
     final index = entries.indexWhere((entry) => entry.id == transactionId);
     if (index >= 0) {
       final entry = entries[index];
-      entries[index] = MoneyTransaction(id: entry.id, title: entry.title, amountPaise: entry.amountPaise, kind: entry.kind, categoryId: entry.categoryId, date: entry.date, note: entry.note, source: entry.source, bankName: entry.bankName, externalId: entry.externalId, recipientKey: entry.recipientKey, hasReceipt: true);
+      entries[index] = MoneyTransaction(
+        id: entry.id,
+        title: entry.title,
+        amountPaise: entry.amountPaise,
+        kind: entry.kind,
+        categoryId: entry.categoryId,
+        date: entry.date,
+        note: entry.note,
+        source: entry.source,
+        bankName: entry.bankName,
+        externalId: entry.externalId,
+        recipientKey: entry.recipientKey,
+        hasReceipt: true,
+      );
     }
   }
+
   @override
-  Future<Uint8List?> transactionReceipt(int transactionId) async => _transactionReceipts[transactionId];
+  Future<Uint8List?> transactionReceipt(int transactionId) async =>
+      _transactionReceipts[transactionId];
   @override
-  Future<void> deleteTransactionReceipt(int transactionId) async => _transactionReceipts.remove(transactionId);
+  Future<void> deleteTransactionReceipt(int transactionId) async =>
+      _transactionReceipts.remove(transactionId);
   @override
-  Future<bool> wasSyncedOn(DateTime date) async => _syncedDates.contains(dateKey(date));
+  Future<bool> wasSyncedOn(DateTime date) async =>
+      _syncedDates.contains(dateKey(date));
   @override
-  Future<void> markSynced(DateTime date) async => _syncedDates.add(dateKey(date));
+  Future<void> markSynced(DateTime date) async =>
+      _syncedDates.add(dateKey(date));
   @override
   Future<DateTime?> lastSmsSyncAt() async => _lastSmsSync;
   @override
-  Future<void> recordSmsSync({required DateTime completedAt, required int imported, required bool automatic}) async => _lastSmsSync = completedAt;
+  Future<void> recordSmsSync({
+    required DateTime completedAt,
+    required int imported,
+    required bool automatic,
+  }) async => _lastSmsSync = completedAt;
 
   @override
   Future<void> delete(int id) async {
@@ -118,6 +176,7 @@ class MemoryRepository implements MoneyRepository {
   Future<void> saveTheme(String theme) async {
     this.theme = theme;
   }
+
   @override
   Future<bool> loadSmsConsent() async => smsConsent;
   @override
@@ -125,7 +184,8 @@ class MemoryRepository implements MoneyRepository {
   @override
   Future<bool> loadInitialSmsSyncComplete() async => initialSmsSyncComplete;
   @override
-  Future<void> saveInitialSmsSyncComplete() async => initialSmsSyncComplete = true;
+  Future<void> saveInitialSmsSyncComplete() async =>
+      initialSmsSyncComplete = true;
 
   @override
   Future<void> close() async {}
@@ -172,6 +232,7 @@ class MemoryRepository implements MoneyRepository {
     await save(transaction);
     await saveDebt(draft.linkedTo(entries.last.id!));
   }
+
   @override
   Future<int> saveSharedExpenses(
     MoneyTransaction transaction,
