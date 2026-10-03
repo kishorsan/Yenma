@@ -79,10 +79,10 @@ void main() {
       expect(debt.note, 'Pay whenever you can');
       expect(debt.transactionId, repository.entries.single.id);
       expect(
-        await repository.debtReceipt(debt.id),
+        await repository.transactionReceipt(repository.entries.single.id!),
         orderedEquals(receipts.image!),
       );
-      await tester.tap(find.text('Debts'));
+      await tester.tap(find.text('Debt'));
       await tester.pumpAndSettle();
       await tap(tester, 'Arun');
       await tap(tester, 'Dinner split');
@@ -120,7 +120,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Debts'));
+      await tester.tap(find.text('Debt'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Add debt'));
       await tester.pumpAndSettle();

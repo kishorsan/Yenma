@@ -94,10 +94,7 @@ class _TransactionDetailState extends State<TransactionDetail> {
                     style: TextStyle(
                       fontSize: 36,
                       fontWeight: FontWeight.bold,
-                      color: kindColor(
-                        transaction.kind,
-                        Theme.of(context).brightness,
-                      ),
+                      color: kindColor(transaction.kind, context),
                     ),
                   ),
                 ),

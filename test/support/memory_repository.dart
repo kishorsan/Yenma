@@ -1,6 +1,8 @@
 import 'package:yenma/data/money_repository.dart';
 import 'package:yenma/domain/money.dart';
 import 'package:yenma/domain/debt.dart';
+import 'package:yenma/domain/monthly_plan.dart';
+import 'package:yenma/domain/split.dart';
 
 import 'dart:typed_data';
 
@@ -11,6 +13,8 @@ class MemoryRepository implements MoneyRepository {
       _people.values.toList()
         ..sort((a, b) => personNameKey(a).compareTo(personNameKey(b)));
   final List<MoneyTransaction> entries = [];
+  final List<MoneyPlan> moneyPlans = [];
+  final List<PlanType> savedPlanTypes = [];
   String theme = 'system';
   bool smsConsent = false;
   bool initialSmsSyncComplete = false;
@@ -18,10 +22,15 @@ class MemoryRepository implements MoneyRepository {
   int _id = 0;
   int _debtId = 0;
   int _repaymentId = 0;
+  int _splitGroupId = 0;
+  int _splitEntryId = 0;
+  int _splitMemberId = 0;
   final _debts = <int, DebtDraft>{};
   final _receipts = <int, Uint8List>{};
   final _transactionReceipts = <int, Uint8List>{};
   final _repayments = <Repayment>[];
+  final _splitGroups = <SplitGroup>[];
+  final _splitEntries = <SplitEntry>[];
   @override
   Future<void> initialize() async {}
   @override
@@ -62,6 +71,41 @@ class MemoryRepository implements MoneyRepository {
     if (transaction.recipientKey != null) {
       _recipientCategories[transaction.recipientKey!] = transaction.categoryId;
     }
+  }
+
+  @override
+  Future<List<MoneyPlan>> plansForMonth(DateTime month) async => moneyPlans
+      .where(
+        (plan) =>
+            plan.month.year == month.year && plan.month.month == month.month,
+      )
+      .toList();
+
+  @override
+  Future<List<PlanType>> planTypes() async => List.of(savedPlanTypes);
+
+  @override
+  Future<void> savePlan(MoneyPlan plan) async {
+    if (failSave) throw StateError('Disk full');
+    final name = plan.planName.trim();
+    var type = savedPlanTypes
+        .where((item) => item.name.toLowerCase() == name.toLowerCase())
+        .firstOrNull;
+    type ??= PlanType(id: savedPlanTypes.length + 1, name: name);
+    if (!savedPlanTypes.any((item) => item.id == type!.id)) {
+      savedPlanTypes.add(type);
+    }
+    final saved = MoneyPlan(
+      id: plan.id ?? ++_id,
+      planTypeId: type.id,
+      planName: type.name,
+      month: plan.month,
+      plannedPaise: plan.plannedPaise,
+      remainingPaise: plan.remainingPaise,
+      note: plan.note.trim(),
+    );
+    moneyPlans.removeWhere((item) => item.id == saved.id);
+    moneyPlans.add(saved);
   }
 
   @override
@@ -285,4 +329,149 @@ class MemoryRepository implements MoneyRepository {
   @override
   Future<MoneyTransaction?> transactionById(int id) async =>
       entries.where((t) => t.id == id).firstOrNull;
+
+  @override
+  Future<List<SplitGroup>> splitGroups() async {
+    final groups = _splitGroups.map((group) {
+      final recent = _splitEntries
+          .where((entry) => entry.groupId == group.id)
+          .map((entry) => entry.date)
+          .fold<DateTime?>(
+            null,
+            (latest, date) =>
+                latest == null || date.isAfter(latest) ? date : latest,
+          );
+      return SplitGroup(
+        id: group.id,
+        name: group.name,
+        note: group.note,
+        members: group.members,
+        createdAt: group.createdAt,
+        lastActivity: recent,
+      );
+    }).toList();
+    groups.sort(
+      (a, b) => (b.lastActivity ?? b.createdAt).compareTo(
+        a.lastActivity ?? a.createdAt,
+      ),
+    );
+    return groups;
+  }
+
+  @override
+  Future<int> createSplitGroup({
+    required String name,
+    required String note,
+    required List<String> memberNames,
+  }) async {
+    if (failSave) throw StateError('Disk full');
+    final membersByKey = <String, String>{};
+    for (final value in memberNames) {
+      final member = normalizePersonName(value);
+      if (member.isNotEmpty) {
+        membersByKey.putIfAbsent(personNameKey(member), () => member);
+      }
+    }
+    final cleanMembers = membersByKey.values.toList();
+    if (name.trim().isEmpty || cleanMembers.isEmpty) {
+      throw const SplitValidationException(
+        'Enter a group name and at least one member.',
+      );
+    }
+    final id = ++_splitGroupId;
+    final members = cleanMembers
+        .map((member) => SplitMember(id: ++_splitMemberId, name: member))
+        .toList();
+    _splitGroups.add(
+      SplitGroup(
+        id: id,
+        name: name.trim(),
+        note: note.trim(),
+        members: members,
+        createdAt: DateTime.now(),
+      ),
+    );
+    for (final member in members) {
+      _people[personNameKey(member.name)] = member.name;
+    }
+    return id;
+  }
+
+  @override
+  Future<List<SplitEntry>> splitEntries(int groupId) async =>
+      _splitEntries.where((entry) => entry.groupId == groupId).toList()
+        ..sort((a, b) {
+          final date = b.date.compareTo(a.date);
+          return date == 0 ? b.id.compareTo(a.id) : date;
+        });
+
+  @override
+  Future<int> saveSplitEntry(SplitEntryDraft draft) async {
+    if (failSave) throw StateError('Disk full');
+    final group = _splitGroups.where((item) => item.id == draft.groupId).first;
+    final sum = draft.shares.fold<int>(
+      0,
+      (value, share) => value + share.amountPaise,
+    );
+    if (draft.title.trim().isEmpty || sum != draft.amountPaise) {
+      throw const SplitValidationException(
+        'Shares must be positive and add up to the total.',
+      );
+    }
+    final payer = draft.payerAssociateId == null
+        ? null
+        : group.members
+              .where((member) => member.id == draft.payerAssociateId)
+              .first;
+    final savedShares = <SplitEntryShare>[];
+    for (final share in draft.shares) {
+      int? debtId;
+      if (payer == null && !share.isMe) {
+        debtId = ++_debtId;
+        _debts[debtId] = DebtDraft(
+          person: share.name,
+          title: draft.title,
+          amountPaise: share.amountPaise,
+          direction: DebtDirection.owedToMe,
+          date: draft.date,
+          note: draft.note,
+        );
+      } else if (payer != null && share.isMe) {
+        debtId = ++_debtId;
+        _debts[debtId] = DebtDraft(
+          person: payer.name,
+          title: draft.title,
+          amountPaise: share.amountPaise,
+          direction: DebtDirection.iOwe,
+          date: draft.date,
+          note: draft.note,
+        );
+      }
+      savedShares.add(
+        SplitEntryShare(
+          associateId: share.associateId,
+          name: share.name,
+          isMe: share.isMe,
+          amountPaise: share.amountPaise,
+          debtId: debtId,
+          remainingPaise: debtId == null ? null : share.amountPaise,
+        ),
+      );
+    }
+    final id = ++_splitEntryId;
+    _splitEntries.add(
+      SplitEntry(
+        id: id,
+        groupId: draft.groupId,
+        title: draft.title.trim(),
+        amountPaise: draft.amountPaise,
+        date: draft.date,
+        note: draft.note.trim(),
+        payerName: payer?.name ?? 'Me',
+        recordedForSomeoneElse: payer != null,
+        shares: savedShares,
+      ),
+    );
+    return id;
+  }
 }

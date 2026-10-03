@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/money_repository.dart';
 import '../domain/money.dart';
 import '../domain/debt.dart';
+import '../domain/monthly_plan.dart';
+import '../domain/split.dart';
 import '../data/receipt_source.dart';
 import '../data/sms_sync.dart';
 
@@ -56,11 +60,9 @@ class MoneyController extends ChangeNotifier {
           ThemeMode.system;
       await loadMonth(month);
       await loadDebts();
-      try {
-        await sms.scheduleDaily();
-      } on PlatformException {
-        // Desktop/widget-test hosts do not expose the Android SMS channel.
-      } catch (_) {}
+      // Scheduling is best-effort platform work and must not hold the Flutter
+      // application in its initialization state if the channel is unavailable.
+      unawaited(_scheduleDailySync());
       final now = DateTime.now();
       final lastSync = await repository.lastSmsSyncAt();
       final syncedToday = lastSync != null && dateKey(lastSync) == dateKey(now);
@@ -73,6 +75,14 @@ class MoneyController extends ChangeNotifier {
       initializing = false;
       _emit();
     }
+  }
+
+  Future<void> _scheduleDailySync() async {
+    try {
+      await sms.scheduleDaily();
+    } on PlatformException {
+      // Desktop/widget-test hosts do not expose the Android SMS channel.
+    } catch (_) {}
   }
 
   Future<void> grantSmsConsent() async {
@@ -153,7 +163,9 @@ class MoneyController extends ChangeNotifier {
     _emit();
     try {
       final result = await repository.transactions(month);
-      if (generation == _generation) transactions = result;
+      if (generation == _generation) {
+        transactions = result;
+      }
     } catch (_) {
       if (generation == _generation) {
         error = 'Transactions could not be loaded. Please retry.';
@@ -164,6 +176,38 @@ class MoneyController extends ChangeNotifier {
         _emit();
       }
     }
+  }
+
+  Future<List<MoneyPlan>> plansForMonth(DateTime selected) =>
+      repository.plansForMonth(selected);
+
+  Future<List<PlanType>> planTypes() => repository.planTypes();
+
+  Future<void> savePlan(MoneyPlan plan) => repository.savePlan(plan);
+
+  Future<List<SplitGroup>> splitGroups() => repository.splitGroups();
+
+  Future<int> createSplitGroup({
+    required String name,
+    required String note,
+    required List<String> memberNames,
+  }) async {
+    final id = await repository.createSplitGroup(
+      name: name,
+      note: note,
+      memberNames: memberNames,
+    );
+    await loadDebts();
+    return id;
+  }
+
+  Future<List<SplitEntry>> splitEntries(int groupId) =>
+      repository.splitEntries(groupId);
+
+  Future<int> saveSplitEntry(SplitEntryDraft draft) async {
+    final id = await repository.saveSplitEntry(draft);
+    await loadDebts();
+    return id;
   }
 
   Future<void> save(MoneyTransaction transaction, {Uint8List? receipt}) async {

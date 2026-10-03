@@ -74,7 +74,7 @@ void main() {
         YenmaApp(repository: repository, showWelcome: false),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Debts'));
+      await tester.tap(find.text('Debt'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Add debt'));
       await tester.pumpAndSettle();
@@ -91,7 +91,7 @@ void main() {
       );
       await tester.pageBack();
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Overview'));
+      await tester.pageBack();
       await tester.pumpAndSettle();
       await tester.tap(find.text('Add transaction'));
       await tester.pumpAndSettle();

@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:yenma/data/money_repository.dart';
 import 'package:yenma/domain/money.dart';
+import 'package:yenma/domain/monthly_plan.dart';
 
 void main() {
   sqfliteFfiInit();
@@ -93,10 +94,9 @@ void main() {
 
   test('v6 date-only transactions migrate to noon', () async {
     await repository.save(entry('Legacy', DateTime(2026, 9, 10, 8)));
-    await repository.debtDatabase.update(
-      'transactions',
-      {'date': '2026-09-10'},
-    );
+    await repository.debtDatabase.update('transactions', {
+      'date': '2026-09-10',
+    });
     await repository.debtDatabase.setVersion(6);
     await repository.close();
     await repository.initialize();
@@ -119,7 +119,9 @@ void main() {
 
     final categories = await repository.categories();
     expect(
-      categories.where((category) => category.id >= 14).map((item) => item.name),
+      categories
+          .where((category) => category.id >= 14)
+          .map((item) => item.name),
       ['Rent', 'Received', 'Wallet', 'Savings'],
     );
   });
@@ -133,6 +135,86 @@ void main() {
       (await repository.transactions(DateTime(2026, 9)))
           .map((transaction) => transaction.categoryId),
       everyElement(2),
+    );
+  });
+
+  test(
+    'plans reuse existing types and reference newly created types',
+    () async {
+      final month = DateTime(2026, 10);
+      await repository.savePlan(
+        MoneyPlan(
+          planName: 'Savings',
+          month: month,
+          plannedPaise: 1000000,
+          remainingPaise: 750000,
+          note: 'Emergency fund',
+        ),
+      );
+      await repository.savePlan(
+        MoneyPlan(
+          planName: 'Vacation',
+          month: month,
+          plannedPaise: 2500000,
+          remainingPaise: 2000000,
+        ),
+      );
+
+      final plans = await repository.plansForMonth(month);
+      expect(plans, hasLength(2));
+      final vacation = plans.singleWhere((plan) => plan.planName == 'Vacation');
+      final typeRows = await repository.debtDatabase.query(
+        'plan_type',
+        where: 'plan = ?',
+        whereArgs: ['Vacation'],
+      );
+      expect(typeRows, hasLength(1));
+      expect(vacation.planTypeId, typeRows.single['id']);
+      expect(vacation.remainingPaise, 2000000);
+      expect(
+        (await repository.planTypes()).map((type) => type.name),
+        containsAll(['Savings', 'Vacation']),
+      );
+    },
+  );
+
+  test('v9 wide plans migrate into allocation and subtype rows', () async {
+    final now = DateTime.now();
+    final future = DateTime(now.year, now.month + 3);
+    await repository.debtDatabase.execute('DROP TABLE monthly_plans');
+    await repository.debtDatabase.execute('''CREATE TABLE monthly_plans (
+      month TEXT PRIMARY KEY,
+      salary_paise INTEGER NOT NULL,
+      investment_paise INTEGER NOT NULL,
+      savings_paise INTEGER NOT NULL,
+      loans_paise INTEGER NOT NULL,
+      daily_spend_paise INTEGER NOT NULL,
+      updated_at TEXT NOT NULL
+    )''');
+    await repository.debtDatabase.insert('monthly_plans', {
+      'month': dateKey(future),
+      'salary_paise': 10000000,
+      'investment_paise': 2000000,
+      'savings_paise': 1000000,
+      'loans_paise': 1500000,
+      'daily_spend_paise': 3000000,
+      'updated_at': DateTime.now().toIso8601String(),
+    });
+    await repository.debtDatabase.setVersion(9);
+    await repository.close();
+    await repository.initialize();
+
+    final rows = await repository.plansForMonth(future);
+    expect(rows, hasLength(5));
+    expect(rows.map((plan) => plan.planName), contains('Salary'));
+    expect(
+      rows.singleWhere((plan) => plan.planName == 'Salary').plannedPaise,
+      10000000,
+    );
+    expect(rows.map((plan) => plan.planName), contains('Daily Spend'));
+    expect(
+      rows.every((plan) => plan.remainingPaise == plan.plannedPaise),
+      isTrue,
     );
   });
 

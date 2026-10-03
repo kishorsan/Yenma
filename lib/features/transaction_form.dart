@@ -475,7 +475,7 @@ class _TransactionFormState extends State<TransactionForm> {
                           parsePaise(_share.text)! <=
                               _available + (parsePaise(_share.text) ?? 0))
                         Text(
-                          'Your share: ${formatMoney(_available - parsePaise(_share.text)!)} · Friend owes: ${formatMoney(parsePaise(_share.text)!)}',
+                          'Your share: ${formatMoney(_available)} · Friend owes: ${formatMoney(parsePaise(_share.text)!)}',
                         ),
                       const SizedBox(height: 16),
                       const Text(

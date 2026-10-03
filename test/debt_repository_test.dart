@@ -83,16 +83,20 @@ void main() {
             'color': 0xFFFF9F43,
             'kinds': 'expense',
           });
-          await db.insert('transactions', meal(id: 42).toRow());
+          final legacyMeal = meal(id: 42).toRow()
+            ..remove('bank_name')
+            ..remove('external_id')
+            ..remove('recipient_key');
+          await db.insert('transactions', legacyMeal);
           await db.insert('settings', {'key': 'theme', 'value': 'dark'});
         },
       ),
     );
     await old.close();
     await repository.initialize();
-    expect(await repository.debtDatabase.getVersion(), 3);
+    expect(await repository.debtDatabase.getVersion(), 13);
     expect((await repository.transactionById(42))!.amountPaise, 50000);
-    expect((await repository.categories()).single.id, 1);
+    expect((await repository.categories()).first.id, 1);
     expect(await repository.loadTheme(), 'dark');
     await repository.saveDebt(share(transactionId: 42));
     expect((await repository.debts()).single.remainingPaise, 25000);

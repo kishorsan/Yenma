@@ -154,8 +154,10 @@ class _DebtsScreenState extends State<DebtsScreen> {
                 ButtonSegment(value: true, label: Text('Settled')),
               ],
               selected: {_settled},
-              onSelectionChanged: (value) =>
-                  setState(() => _settled = value.first),
+              onSelectionChanged: (value) => setState(() {
+                _settled = value.first;
+                _expandedPeople.clear();
+              }),
             ),
             const SizedBox(height: 20),
             if (controller.debtsLoading)
@@ -214,8 +216,12 @@ class _DebtsScreenState extends State<DebtsScreen> {
                                   Expanded(
                                     child: Text(
                                       debts.first.person,
-                                      style: Theme.of(context).textTheme.titleLarge
-                                          ?.copyWith(fontWeight: FontWeight.bold),
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleLarge
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                     ),
                                   ),
                                   Column(
@@ -254,24 +260,41 @@ class _DebtsScreenState extends State<DebtsScreen> {
                                       .where(
                                         (debt) =>
                                             debt.personKey == person &&
-                                            debt.direction == DebtDirection.owedToMe,
+                                            debt.direction ==
+                                                DebtDirection.owedToMe,
                                       )
-                                      .fold(0, (sum, debt) => sum + debt.remainingPaise);
-                                  try {
-                                    await Clipboard.setData(ClipboardData(
-                                      text:
-                                          'Hi ${debts.first.person}, just a reminder that ${formatMoney(total)} is pending for the payments I covered. Please pay me back when you can. Thanks!',
-                                    ));
-                                    if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Reminder copied. You can share it when you’re ready.')),
+                                      .fold(
+                                        0,
+                                        (sum, debt) =>
+                                            sum + debt.remainingPaise,
                                       );
+                                  try {
+                                    await Clipboard.setData(
+                                      ClipboardData(
+                                        text:
+                                            'Hi ${debts.first.person}, just a reminder that ${formatMoney(total)} is pending for the payments I covered. Please pay me back when you can. Thanks!',
+                                      ),
+                                    );
+                                    if (context.mounted) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'Reminder copied. You can share it when you’re ready.',
+                                              ),
+                                            ),
+                                          );
                                     }
                                   } catch (_) {
                                     if (context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Could not copy the reminder. Please retry.')),
-                                      );
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                            const SnackBar(
+                                              content: Text(
+                                                'Could not copy the reminder. Please retry.',
+                                              ),
+                                            ),
+                                          );
                                     }
                                   }
                                 },

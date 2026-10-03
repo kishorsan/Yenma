@@ -26,9 +26,13 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Add transaction'), findsOneWidget);
       expect(find.byKey(const ValueKey('welcome-quote')), findsNothing);
-      await tester.tap(find.text('Debts'));
+      await tester.ensureVisible(find.text('Debt'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Debt'));
       await tester.pumpAndSettle();
       expect(find.byKey(const ValueKey('welcome-quote')), findsNothing);
+      await tester.pageBack();
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Settings'));
       await tester.pumpAndSettle();
       final heading = tester.widget<Text>(find.text('Make yourself at home.'));

@@ -10,6 +10,10 @@ import 'transaction_detail.dart';
 import 'debts/debts_screen.dart';
 import 'debts/debt_form.dart';
 import 'bulk_categorization_screen.dart';
+import 'card_transactions_screen.dart';
+import 'feature_landing_screen.dart';
+import 'split/split_screen.dart';
+import 'monthly_plan_screen.dart';
 
 class _YenmaDestination {
   const _YenmaDestination(this.icon, this.selectedIcon, this.label);
@@ -25,17 +29,9 @@ class _YenmaDestination {
 }
 
 const _yenmaDestinations = <_YenmaDestination>[
-  _YenmaDestination(
-    Icons.grid_view_outlined,
-    Icons.grid_view_rounded,
-    'Overview',
-  ),
-  _YenmaDestination(
-    Icons.receipt_long_outlined,
-    Icons.receipt_long,
-    'Transactions',
-  ),
-  _YenmaDestination(Icons.handshake_outlined, Icons.handshake, 'Debts'),
+  _YenmaDestination(Icons.home_outlined, Icons.home_rounded, 'Home'),
+  _YenmaDestination(Icons.credit_card_outlined, Icons.credit_card, 'Cards'),
+  _YenmaDestination(Icons.category_outlined, Icons.category, 'Categorize'),
   _YenmaDestination(Icons.tune_outlined, Icons.tune, 'Settings'),
 ];
 
@@ -74,6 +70,55 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _add() => Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (_) => TransactionForm(controller: controller),
+    ),
+  );
+
+  Future<void> _openPlan() async {
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => MonthlyPlanScreen(controller: controller),
+      ),
+    );
+    if (saved == true) await controller.loadMonth(controller.month);
+  }
+
+  void _openSplit() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => SplitGroupsScreen(controller: controller),
+    ),
+  );
+
+  void _openDesignFeature({
+    required String title,
+    required IconData icon,
+    required String description,
+    required List<String> sections,
+  }) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => FeatureLandingScreen(
+        title: title,
+        icon: icon,
+        description: description,
+        sections: sections,
+      ),
+    ),
+  );
+
+  void _openDebts() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (debtContext) => Scaffold(
+        appBar: AppBar(title: const Text('Debt')),
+        body: DebtsScreen(controller: controller),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: () => Navigator.of(debtContext).push(
+            MaterialPageRoute<bool>(
+              builder: (_) => DebtForm(controller: controller),
+            ),
+          ),
+          icon: const Icon(Icons.add),
+          label: const Text('Add debt'),
+        ),
+      ),
     ),
   );
 
@@ -188,23 +233,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ],
           ),
           actions: [
-            if (_tab == 0 || _tab == 1)
-              IconButton(
-                tooltip: 'Categorize transactions',
-                onPressed: ready
-                    ? () => Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) =>
-                              BulkCategorizationScreen(controller: controller),
-                        ),
-                      )
-                    : null,
-                icon: const Icon(Icons.category_outlined),
-              ),
-            if (_tab != 3)
+            if (_tab == 0)
               IconButton(
                 tooltip: 'Sync bank messages',
-                onPressed: controller.syncing ? null : _syncWithConsent,
+                onPressed: !ready || controller.syncing
+                    ? null
+                    : _syncWithConsent,
                 icon: controller.syncing
                     ? const SizedBox(
                         width: 22,
@@ -239,7 +273,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                       child: _tab == 3
                           ? _settings()
                           : _tab == 2
-                          ? DebtsScreen(controller: controller)
+                          ? BulkCategorizationScreen(
+                              controller: controller,
+                              embedded: true,
+                            )
+                          : _tab == 1
+                          ? CardTransactionsScreen(controller: controller)
                           : _ledger(),
                     ),
                   );
@@ -252,18 +291,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             );
           },
         ),
-        floatingActionButton: ready && _tab != 3
+        floatingActionButton: ready && _tab == 0
             ? FloatingActionButton.extended(
-                onPressed: _tab == 2
-                    ? () => Navigator.push(
-                        context,
-                        MaterialPageRoute<bool>(
-                          builder: (_) => DebtForm(controller: controller),
-                        ),
-                      )
-                    : _add,
+                onPressed: _add,
                 icon: const Icon(Icons.add),
-                label: Text(_tab == 2 ? 'Add debt' : 'Add transaction'),
+                label: const Text('Add transaction'),
               )
             : null,
         bottomNavigationBar: MediaQuery.sizeOf(context).width < 700
@@ -332,10 +364,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     style: Theme.of(context).textTheme.titleMedium
                         ?.copyWith(fontWeight: FontWeight.w700),
                   ),
-                  const SizedBox(height: 12),
-                  _monthSelector(),
                   const SizedBox(height: 20),
                   if (!controller.loading && controller.error == null) ...[
+                    _bankCarousel(),
+                    const SizedBox(height: 24),
+                    _featureGrid(),
+                    const SizedBox(height: 24),
                     _summary(),
                     const SizedBox(height: 24),
                     if (_tab == 0 &&
@@ -357,7 +391,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                         if (_tab == 0)
                           TextButton(
                             onPressed: () => setState(() => _tab = 1),
-                            child: const Text('View all'),
+                            child: const Text('View cards'),
                           ),
                       ],
                     ),
@@ -433,64 +467,232 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _monthSelector() => Card(
-    child: Row(
-      children: [
-        IconButton(
-          tooltip: 'Previous month',
-          onPressed:
-              controller.month.year == 1900 && controller.month.month == 1
-              ? null
-              : () => controller.loadMonth(
-                  DateTime(controller.month.year, controller.month.month - 1),
+  Widget _bankCarousel() {
+    final grouped = <String, List<MoneyTransaction>>{};
+    for (final transaction in controller.transactions) {
+      final name = transaction.bankName?.trim();
+      if (name == null || name.isEmpty) continue;
+      grouped.putIfAbsent(name, () => []).add(transaction);
+    }
+    final names = grouped.keys.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    if (names.isEmpty) {
+      return SizedBox(
+        height: 164,
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              children: [
+                const Icon(Icons.account_balance_outlined, size: 34),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Your cards will appear here',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Sync SMS transactions to recognize supported banks.',
+                      ),
+                    ],
+                  ),
                 ),
-          icon: const Icon(Icons.chevron_left),
-        ),
-        Expanded(
-          child: TextButton(
-            onPressed: () => controller.loadMonth(DateTime.now()),
-            child: Text(
-              DateFormat.yMMMM().format(controller.month),
-              textAlign: TextAlign.center,
+              ],
             ),
           ),
         ),
-        IconButton(
-          tooltip: 'Next month',
-          onPressed:
-              controller.month.year == 2100 && controller.month.month == 12
-              ? null
-              : () => controller.loadMonth(
-                  DateTime(controller.month.year, controller.month.month + 1),
+      );
+    }
+    return SizedBox(
+      height: 164,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: names.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 12),
+        itemBuilder: (context, index) {
+          final name = names[index];
+          final transactions = grouped[name]!;
+          final expense = transactions
+              .where((item) => item.kind == TransactionKind.expense)
+              .fold<int>(0, (total, item) => total + item.amountPaise);
+          return SizedBox(
+            width: 260,
+            child: Card(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(24),
+                onTap: () => setState(() => _tab = 1),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.credit_card_outlined),
+                          const Spacer(),
+                          Text('${transactions.length} entries'),
+                        ],
+                      ),
+                      const Spacer(),
+                      Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        formatMoney(expense),
+                        style: TextStyle(
+                          color: context.yenmaColors.expense,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-          icon: const Icon(Icons.chevron_right),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _featureGrid() {
+    final features = <({String label, IconData icon, VoidCallback open})>[
+      (label: 'Plan', icon: Icons.calendar_month_outlined, open: _openPlan),
+      (
+        label: 'Split',
+        icon: Icons.group_outlined,
+        open: _openSplit,
+      ),
+      (
+        label: 'Subscriptions',
+        icon: Icons.subscriptions_outlined,
+        open: () => _openDesignFeature(
+          title: 'Subscriptions',
+          icon: Icons.subscriptions_outlined,
+          description: 'Keep recurring services and billing dates visible.',
+          sections: const [
+            'Active subscriptions',
+            'Upcoming billing dates',
+            'Subscription details',
+          ],
+        ),
+      ),
+      (
+        label: 'EMI',
+        icon: Icons.event_repeat_outlined,
+        open: () => _openDesignFeature(
+          title: 'EMI',
+          icon: Icons.event_repeat_outlined,
+          description: 'Follow upcoming instalments and their paid state.',
+          sections: const [
+            'Upcoming instalments',
+            'Principal and interest',
+            'Payment history',
+          ],
+        ),
+      ),
+      (
+        label: 'Loan',
+        icon: Icons.account_balance_outlined,
+        open: () => _openDesignFeature(
+          title: 'Loan',
+          icon: Icons.account_balance_outlined,
+          description: 'Track borrowing, balances, and repayment schedules.',
+          sections: const ['Loan cards', 'Payment schedule', 'Loan details'],
+        ),
+      ),
+      (label: 'Debt', icon: Icons.handshake_outlined, open: _openDebts),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Your money tools',
+          style: Theme.of(context).textTheme.titleMedium
+              ?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final itemWidth = (constraints.maxWidth - 24) / 3;
+            return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: features
+                  .map(
+                    (feature) => SizedBox(
+                      width: itemWidth,
+                      child: Card(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(24),
+                          onTap: feature.open,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 18,
+                            ),
+                            child: Column(
+                              children: [
+                                CircleAvatar(child: Icon(feature.icon)),
+                                const SizedBox(height: 10),
+                                Text(
+                                  feature.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
+            );
+          },
         ),
       ],
-    ),
-  );
+    );
+  }
 
   Widget _summary() {
     final summary = controller.summary;
+    final colors = context.yenmaColors;
     return Column(
       children: [
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            color: const Color(0xFF153D32),
+            color: colors.heroSurface,
             borderRadius: BorderRadius.circular(28),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
+              Row(
                 children: [
-                  Icon(Icons.north_east, color: mint, size: 18),
-                  SizedBox(width: 8),
+                  Icon(Icons.north_east, color: colors.onHeroSurface, size: 18),
+                  const SizedBox(width: 8),
                   Text(
                     'MONTHLY SPENDING',
                     style: TextStyle(
-                      color: mint,
+                      color: colors.onHeroSurface,
                       letterSpacing: 1.5,
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -503,10 +705,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 fit: BoxFit.scaleDown,
                 child: Text(
                   formatMoney(summary.expense),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 38,
                     fontWeight: FontWeight.w700,
-                    color: Colors.white,
+                    color: colors.onHeroSurface,
                     letterSpacing: -1,
                   ),
                 ),
@@ -514,7 +716,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               const SizedBox(height: 16),
               Text(
                 '${controller.transactions.length} entries  ·  Transfers excluded',
-                style: const TextStyle(color: Color(0xFFBBD4CB)),
+                style: TextStyle(color: colors.onHeroSurfaceMuted),
               ),
             ],
           ),
@@ -568,7 +770,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w700,
-                  color: kindColor(kind, Theme.of(context).brightness),
+                  color: kindColor(kind, context),
                 ),
               ),
             ),
@@ -627,7 +829,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Widget _transactionTile(MoneyTransaction transaction) {
     final category = controller.category(transaction.categoryId);
-    final color = kindColor(transaction.kind, Theme.of(context).brightness);
+    final color = kindColor(transaction.kind, context);
     final tile = Card(
       child: InkWell(
         borderRadius: BorderRadius.circular(24),

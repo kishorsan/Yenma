@@ -281,9 +281,8 @@ class _DebtDetailState extends State<DebtDetail> {
                             onPressed:
                                 _busy ||
                                     widget.controller.debtError != null ||
-                                    debt.date.isAfter(
-                                      calendarDate(DateTime.now()),
-                                    )
+                                    calendarDate(debt.date)
+                                        .isAfter(calendarDate(DateTime.now()))
                                 ? null
                                 : () async {
                                     final saved = await Navigator.push<bool>(
@@ -300,7 +299,8 @@ class _DebtDetailState extends State<DebtDetail> {
                             icon: const Icon(Icons.check_circle_outline),
                             label: const Text('Record repayment'),
                           ),
-                        if (debt.date.isAfter(calendarDate(DateTime.now())))
+                        if (calendarDate(debt.date)
+                            .isAfter(calendarDate(DateTime.now())))
                           const Text(
                             'Repayments can be recorded on or after the debt date.',
                           ),

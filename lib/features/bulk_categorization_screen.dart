@@ -6,9 +6,14 @@ import '../app/theme.dart';
 import '../domain/money.dart';
 
 class BulkCategorizationScreen extends StatefulWidget {
-  const BulkCategorizationScreen({super.key, required this.controller});
+  const BulkCategorizationScreen({
+    super.key,
+    required this.controller,
+    this.embedded = false,
+  });
 
   final MoneyController controller;
+  final bool embedded;
 
   @override
   State<BulkCategorizationScreen> createState() =>
@@ -87,11 +92,7 @@ class _BulkCategorizationScreenState extends State<BulkCategorizationScreen> {
           : widget.controller.categories
                 .where((category) => category.kinds.contains(_selectedKind))
                 .toList();
-      return PopScope(
-        canPop: !_saving,
-        child: Scaffold(
-          appBar: AppBar(title: const Text('Categorize transactions')),
-          body: Center(
+      final content = Center(
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 720),
               child: transactions.isEmpty && !_saving
@@ -229,8 +230,15 @@ class _BulkCategorizationScreenState extends State<BulkCategorizationScreen> {
                       ],
                     ),
             ),
-          ),
-        ),
+          );
+      return PopScope(
+        canPop: !_saving,
+        child: widget.embedded
+            ? content
+            : Scaffold(
+                appBar: AppBar(title: const Text('Categorize transactions')),
+                body: content,
+              ),
       );
     },
   );
