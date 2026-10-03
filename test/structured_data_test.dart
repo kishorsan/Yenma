@@ -60,6 +60,47 @@ void main() {
     );
   });
 
+  test('v13 subscription rows gain a yearly billing month', () async {
+    await repository.close();
+    final databasePath = p.join(directory.path, 'money.db');
+    await databaseFactoryFfi.deleteDatabase(databasePath);
+    final legacy = await databaseFactoryFfi.openDatabase(
+      databasePath,
+      options: OpenDatabaseOptions(
+        version: 13,
+        onCreate: (db, version) async {
+          await db.execute('''CREATE TABLE subscriptions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            subscription_name TEXT NOT NULL,
+            amount_paise INTEGER NOT NULL CHECK(amount_paise > 0),
+            subscription_date INTEGER NOT NULL CHECK(subscription_date BETWEEN 1 AND 28),
+            type INTEGER NOT NULL CHECK(type IN (0,1)),
+            is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0,1)),
+            notify_me INTEGER NOT NULL DEFAULT 0 CHECK(notify_me IN (0,1)),
+            subscription_link TEXT
+          )''');
+          await db.insert('subscriptions', {
+            'subscription_name': 'Legacy annual plan',
+            'amount_paise': 120000,
+            'subscription_date': 12,
+            'type': SubscriptionPeriod.yearly.index,
+          });
+        },
+      ),
+    );
+    await legacy.close();
+
+    repository = SqliteMoneyRepository(
+      factory: databaseFactoryFfi,
+      path: databasePath,
+    );
+    await repository.initialize();
+
+    expect(await repository.debtDatabase.getVersion(), 14);
+    final subscriptions = await repository.subscriptions();
+    expect(subscriptions.single.billingMonth, 1);
+  });
+
   test('group repositories enforce relationships and atomic totals', () async {
     final associateId = await repository.referenceData.saveAssociate(
       const AssociateRecord(name: 'Arun', phoneNumber: '+919999999999'),
@@ -144,19 +185,20 @@ void main() {
     },
   );
 
-  test('subscription constraints follow the DBML billing-day rule', () async {
+  test('subscriptions persist recurrence and enforce billing dates', () async {
     await repository.commitments.saveSubscription(
       const SubscriptionRecord(
         name: 'Music',
         amountPaise: 99900,
         billingDay: 12,
-        period: SubscriptionPeriod.monthly,
+        billingMonth: 10,
+        period: SubscriptionPeriod.yearly,
       ),
     );
-    expect(
-      await repository.commitments.subscriptions(active: true),
-      hasLength(1),
-    );
+    final saved = await repository.commitments.subscriptions(active: true);
+    expect(saved, hasLength(1));
+    expect(saved.single.billingMonth, 10);
+    expect(saved.single.period, SubscriptionPeriod.yearly);
     await expectLater(
       repository.commitments.saveSubscription(
         const SubscriptionRecord(

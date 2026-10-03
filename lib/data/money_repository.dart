@@ -15,7 +15,8 @@ import 'planning_data.dart';
 import 'reference_data.dart';
 import 'splitting_data.dart';
 
-abstract interface class MoneyRepository implements DebtRepository, SplitRepository {
+abstract interface class MoneyRepository
+    implements DebtRepository, SplitRepository, SubscriptionRepository {
   Future<void> initialize();
   Future<List<MoneyCategory>> categories();
   Future<List<MoneyTransaction>> transactions(DateTime month);
@@ -72,7 +73,7 @@ class SqliteMoneyRepository
     _database = await _factory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 13,
+        version: 14,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: (db, version) async {
           await _createMoneySchema(db);
@@ -153,6 +154,14 @@ class SqliteMoneyRepository
             );
           }
           if (oldVersion < 13) await createSplittingSchema(db);
+          if (oldVersion < 14) {
+            await _addColumnIfMissing(
+              db,
+              'subscriptions',
+              'billing_month',
+              'INTEGER NOT NULL DEFAULT 1 CHECK(billing_month BETWEEN 1 AND 12)',
+            );
+          }
         },
       ),
     );
@@ -164,6 +173,14 @@ class SqliteMoneyRepository
   CommitmentsRepository get commitments => CommitmentsRepository(_db);
   ApplicationSupportRepository get applicationSupport =>
       ApplicationSupportRepository(_db);
+
+  @override
+  Future<int> saveSubscription(SubscriptionRecord value) =>
+      commitments.saveSubscription(value);
+
+  @override
+  Future<List<SubscriptionRecord>> subscriptions({bool? active}) =>
+      commitments.subscriptions(active: active);
 
   static Future<void> _createMoneySchema(DatabaseExecutor db) async {
     await _createCategoriesTable(db);

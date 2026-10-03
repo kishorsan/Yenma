@@ -14,6 +14,7 @@ import 'card_transactions_screen.dart';
 import 'feature_landing_screen.dart';
 import 'split/split_screen.dart';
 import 'monthly_plan_screen.dart';
+import 'subscriptions/subscriptions_screen.dart';
 
 class _YenmaDestination {
   const _YenmaDestination(this.icon, this.selectedIcon, this.label);
@@ -85,6 +86,12 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void _openSplit() => Navigator.of(context).push(
     MaterialPageRoute<void>(
       builder: (_) => SplitGroupsScreen(controller: controller),
+    ),
+  );
+
+  void _openSubscriptions() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => SubscriptionsScreen(controller: controller),
     ),
   );
 
@@ -569,24 +576,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Widget _featureGrid() {
     final features = <({String label, IconData icon, VoidCallback open})>[
       (label: 'Plan', icon: Icons.calendar_month_outlined, open: _openPlan),
-      (
-        label: 'Split',
-        icon: Icons.group_outlined,
-        open: _openSplit,
-      ),
+      (label: 'Split', icon: Icons.group_outlined, open: _openSplit),
       (
         label: 'Subscriptions',
         icon: Icons.subscriptions_outlined,
-        open: () => _openDesignFeature(
-          title: 'Subscriptions',
-          icon: Icons.subscriptions_outlined,
-          description: 'Keep recurring services and billing dates visible.',
-          sections: const [
-            'Active subscriptions',
-            'Upcoming billing dates',
-            'Subscription details',
-          ],
-        ),
+        open: _openSubscriptions,
       ),
       (
         label: 'EMI',

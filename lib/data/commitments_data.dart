@@ -6,6 +6,7 @@ Future<void> createCommitmentsSchema(DatabaseExecutor db) async {
     subscription_name TEXT NOT NULL,
     amount_paise INTEGER NOT NULL CHECK(amount_paise > 0),
     subscription_date INTEGER NOT NULL CHECK(subscription_date BETWEEN 1 AND 28),
+    billing_month INTEGER NOT NULL DEFAULT 1 CHECK(billing_month BETWEEN 1 AND 12),
     type INTEGER NOT NULL CHECK(type IN (0,1)),
     is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0,1)),
     notify_me INTEGER NOT NULL DEFAULT 0 CHECK(notify_me IN (0,1)),
@@ -48,12 +49,18 @@ enum LoanStatus { pending, fullyPaid }
 
 enum LoanType { revolving, oneTime, emiAmortizing }
 
+abstract interface class SubscriptionRepository {
+  Future<int> saveSubscription(SubscriptionRecord value);
+  Future<List<SubscriptionRecord>> subscriptions({bool? active});
+}
+
 class SubscriptionRecord {
   const SubscriptionRecord({
     this.id,
     required this.name,
     required this.amountPaise,
     required this.billingDay,
+    this.billingMonth = 1,
     required this.period,
     this.isActive = true,
     this.notifyMe = false,
@@ -63,6 +70,7 @@ class SubscriptionRecord {
   final String name;
   final int amountPaise;
   final int billingDay;
+  final int billingMonth;
   final SubscriptionPeriod period;
   final bool isActive;
   final bool notifyMe;
@@ -109,22 +117,25 @@ class LoanTrackingRecord {
   final bool isPaid;
 }
 
-class CommitmentsRepository {
+class CommitmentsRepository implements SubscriptionRepository {
   const CommitmentsRepository(this.db);
   final Database db;
 
+  @override
   Future<int> saveSubscription(SubscriptionRecord value) =>
       db.insert('subscriptions', {
         if (value.id != null) 'id': value.id,
         'subscription_name': value.name.trim(),
         'amount_paise': value.amountPaise,
         'subscription_date': value.billingDay,
+        'billing_month': value.billingMonth,
         'type': value.period.index,
         'is_active': value.isActive ? 1 : 0,
         'notify_me': value.notifyMe ? 1 : 0,
         'subscription_link': value.link,
       }, conflictAlgorithm: ConflictAlgorithm.replace);
 
+  @override
   Future<List<SubscriptionRecord>> subscriptions({bool? active}) async =>
       (await db.query(
             'subscriptions',
@@ -138,6 +149,7 @@ class CommitmentsRepository {
               name: row['subscription_name'] as String,
               amountPaise: row['amount_paise'] as int,
               billingDay: row['subscription_date'] as int,
+              billingMonth: row['billing_month'] as int,
               period: SubscriptionPeriod.values[row['type'] as int],
               isActive: row['is_active'] == 1,
               notifyMe: row['notify_me'] == 1,

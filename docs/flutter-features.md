@@ -105,10 +105,21 @@ Evidence: [welcome screen](../lib/features/welcome_screen.dart), [app compositio
 | F41 | Light, dark, and follow-system appearance; preference saved locally. | Keep the app comfortable in different lighting. | Support visual preference without reselecting it each launch. |
 | F42 | Random welcome phrase once per launch, automatic continuation after two seconds, immediate Open my money action. Accessible-navigation mode requires manual continuation. | Enter the app through a short branded welcome. | Likely a tone/branding choice; a specific user problem is unconfirmed. Manual continuation prevents the text disappearing while being read. |
 | F43 | Bottom navigation on narrow layouts, navigation rail on wider layouts, constrained content width, and stacking summary cards for larger text. | Use a wider screen or larger text setting. | Keep navigation and financial values readable across supported layouts. This does not establish platform support or certify full accessibility. |
-| F44 | Local SQLite persistence for entries, debts, receipts, names, categories, plans, split groups, commitments, and preferences; current schema is version 13 with upgrade paths. | Close and reopen the app without losing saved records. | Preserve history and preferences locally and support upgrading existing Yenma databases. No export, backup, or restore UI exists. |
+| F44 | Local SQLite persistence for entries, debts, receipts, names, categories, plans, split groups, commitments, and preferences; current schema is version 14 with upgrade paths. | Close and reopen the app without losing saved records. | Preserve history and preferences locally and support upgrading existing Yenma databases. No export, backup, or restore UI exists. |
 | F45 | Exact integer-paise money handling and Indian rupee formatting. | Record ₹123.45 without floating-point rounding drift. | Keep stored amounts and aggregation exact to the paise. INR is fixed, not a currency selector. |
 | F46 | Empty/loading/error states, retry actions, and protection against older asynchronous loads overwriting newer selections. | Switch months quickly or retry a failed read. | Explain absent data and avoid showing the wrong selection’s results. |
 | F47 | Settings displays INR, local-storage/no-account information, and app version. | Check the app’s currency and basic storage model. | Set expectations about how records are handled. These labels are informational controls, not editable preferences. |
+
+## Subscriptions
+
+Evidence: [subscription screens](../lib/features/subscriptions/subscriptions_screen.dart), [commitment persistence](../lib/data/commitments_data.dart), [controller](../lib/app/money_controller.dart).
+
+| ID | Existing feature and behavior | Example use case | Problem it solves |
+| --- | --- | --- | --- |
+| F53 | Record and edit a named monthly or yearly subscription with an exact INR amount and billing date. Monthly records recur by day; yearly records retain month and day. | Add a ₹199 monthly streaming service or an annual storage plan. | Keep recurring commitments visible without treating them as completed ledger transactions. Billing days are limited to 1–28 so every monthly recurrence has a valid date. |
+| F54 | Browse saved subscriptions as cards showing amount, active/paused state, and the next billing date; pull to refresh and open an individual detail view. | Scan which service bills next. | Bring recurring costs and timing into one local list. The list does not yet total or categorize subscription costs. |
+| F55 | Subscription details show a countdown ring, renewal date, price, active/pause control, and edit action. An optional HTTP(S) account link can open in the platform browser. | Pause a cancelled service in Yenma or visit its account page. | Make each commitment actionable from its record. Opening the external browser depends on the platform URL-launcher integration and is not device-verified here. |
+| F56 | Save a “Notify me” preference and display its status clearly. | Mark a subscription for a future reminder workflow. | Preserves reminder intent without falsely claiming a notification was scheduled. Flutter does not currently schedule subscription notifications. |
 
 ## Product intent that needs confirmation
 

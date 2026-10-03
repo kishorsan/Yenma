@@ -1,4 +1,5 @@
 import 'package:yenma/data/money_repository.dart';
+import 'package:yenma/data/commitments_data.dart';
 import 'package:yenma/domain/money.dart';
 import 'package:yenma/domain/debt.dart';
 import 'package:yenma/domain/monthly_plan.dart';
@@ -15,6 +16,7 @@ class MemoryRepository implements MoneyRepository {
   final List<MoneyTransaction> entries = [];
   final List<MoneyPlan> moneyPlans = [];
   final List<PlanType> savedPlanTypes = [];
+  final List<SubscriptionRecord> savedSubscriptions = [];
   String theme = 'system';
   bool smsConsent = false;
   bool initialSmsSyncComplete = false;
@@ -106,6 +108,38 @@ class MemoryRepository implements MoneyRepository {
     );
     moneyPlans.removeWhere((item) => item.id == saved.id);
     moneyPlans.add(saved);
+  }
+
+  @override
+  Future<int> saveSubscription(SubscriptionRecord value) async {
+    if (failSave) throw StateError('Disk full');
+    final id = value.id ?? ++_id;
+    final saved = SubscriptionRecord(
+      id: id,
+      name: value.name.trim(),
+      amountPaise: value.amountPaise,
+      billingDay: value.billingDay,
+      billingMonth: value.billingMonth,
+      period: value.period,
+      isActive: value.isActive,
+      notifyMe: value.notifyMe,
+      link: value.link?.trim(),
+    );
+    savedSubscriptions.removeWhere((item) => item.id == id);
+    savedSubscriptions.add(saved);
+    return id;
+  }
+
+  @override
+  Future<List<SubscriptionRecord>> subscriptions({bool? active}) async {
+    final result = savedSubscriptions
+        .where((item) => active == null || item.isActive == active)
+        .toList();
+    result.sort((a, b) {
+      final month = a.billingMonth.compareTo(b.billingMonth);
+      return month == 0 ? a.billingDay.compareTo(b.billingDay) : month;
+    });
+    return result;
   }
 
   @override

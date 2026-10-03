@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/money_repository.dart';
+import '../data/commitments_data.dart';
 import '../domain/money.dart';
 import '../domain/debt.dart';
 import '../domain/monthly_plan.dart';
@@ -184,6 +185,12 @@ class MoneyController extends ChangeNotifier {
   Future<List<PlanType>> planTypes() => repository.planTypes();
 
   Future<void> savePlan(MoneyPlan plan) => repository.savePlan(plan);
+
+  Future<List<SubscriptionRecord>> subscriptions({bool? active}) =>
+      repository.subscriptions(active: active);
+
+  Future<int> saveSubscription(SubscriptionRecord subscription) =>
+      repository.saveSubscription(subscription);
 
   Future<List<SplitGroup>> splitGroups() => repository.splitGroups();
 

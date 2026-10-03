@@ -38,6 +38,7 @@ dependencies:
   path: ^1.9.1
   intl: ^0.20.3
   image_picker: ^1.2.3
+  url_launcher: ^6.3.3
 
 dev_dependencies:
   integration_test:
