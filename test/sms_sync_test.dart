@@ -26,7 +26,7 @@ void main() {
       ),
     )!;
 
-    expect(transaction.bankName, 'HDFC Bank');
+    expect(transaction.bankName, 'HDFC Credit Card');
     expect(transaction.instrumentType, FinancialInstrumentType.creditCard);
     expect(transaction.instrumentLast4, '4321');
     expect(transaction.importRole, ImportedTransactionRole.cardPurchase);
@@ -51,6 +51,7 @@ Mandate ID: 00000001''',
     )!;
 
     expect(transaction.title, 'Google Play');
+    expect(transaction.bankName, 'HDFC Credit Card');
     expect(transaction.kind, TransactionKind.expense);
     expect(transaction.instrumentType, FinancialInstrumentType.creditCard);
     expect(transaction.instrumentLast4, '4321');
@@ -67,6 +68,7 @@ Mandate ID: 00000001''',
     )!;
 
     expect(transaction.title, 'Credit card payment');
+    expect(transaction.bankName, 'HDFC Credit Card');
     expect(transaction.kind, TransactionKind.transfer);
     expect(transaction.categoryId, 12);
     expect(transaction.importRole, ImportedTransactionRole.cardPayment);
@@ -131,11 +133,35 @@ Ref 000000000056''',
       ),
     )!;
 
-    expect(iciciCard.bankName, 'ICICI Bank');
+    expect(iciciCard.bankName, 'ICICI Credit Card');
     expect(iciciCard.instrumentType, FinancialInstrumentType.creditCard);
     expect(iciciCard.instrumentLast4, '9876');
     expect(sbiAccount.bankName, 'SBI');
     expect(sbiAccount.instrumentType, FinancialInstrumentType.bankAccount);
     expect(sbiAccount.instrumentLast4, '2468');
+  });
+
+  test('every recognized institution derives a credit card source', () {
+    for (final entry in SmsParser.bankNames.entries) {
+      final transaction = SmsParser.parse(
+        BankSms(
+          address: entry.key,
+          body:
+              'Rs.100 spent on ${entry.value} Credit Card XX1234 at TEST SHOP',
+          timestamp: DateTime(2026, 10, 8),
+        ),
+      )!;
+      final issuer = entry.value.replaceFirst(
+        RegExp(r'\s+Bank$', caseSensitive: false),
+        '',
+      );
+
+      expect(
+        transaction.bankName,
+        '$issuer Credit Card',
+        reason: 'Card variant for ${entry.value}',
+      );
+      expect(transaction.instrumentType, FinancialInstrumentType.creditCard);
+    }
   });
 }

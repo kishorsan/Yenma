@@ -23,7 +23,7 @@ void main() {
         categoryId: 13,
         date: now,
         source: 'SMS',
-        bankName: 'HDFC Bank',
+        bankName: 'HDFC Credit Card',
         instrumentType: FinancialInstrumentType.creditCard,
         instrumentLast4: '4321',
         importRole: ImportedTransactionRole.cardPurchase,
@@ -37,7 +37,7 @@ void main() {
         categoryId: 13,
         date: now,
         source: 'SMS',
-        bankName: 'HDFC Bank',
+        bankName: 'HDFC Credit Card',
         instrumentType: FinancialInstrumentType.bankAccount,
         instrumentLast4: '1234',
         importRole: ImportedTransactionRole.accountDebit,
@@ -65,7 +65,7 @@ void main() {
     await tester.tap(find.text('Cards'));
     await tester.pumpAndSettle();
 
-    expect(find.text('HDFC Bank •4321'), findsOneWidget);
+    expect(find.text('HDFC Credit Card •4321'), findsOneWidget);
     expect(find.text('2 transactions'), findsOneWidget);
     expect(find.text(formatMoney(21941)), findsNWidgets(2));
     expect(find.text('ZOMATO LIMITED'), findsOneWidget);

@@ -53,6 +53,7 @@ class SmsParser {
     final paise = amount == null ? null : parsePaise(amount);
     if (paise == null) return null;
     final instrumentType = _instrumentType(upper);
+    final sourceName = _sourceName(bankNames[code]!, instrumentType);
     final isCardPayment =
         instrumentType == FinancialInstrumentType.creditCard &&
         RegExp(
@@ -88,7 +89,7 @@ class SmsParser {
       categoryId: isCardPayment ? 12 : 13,
       date: _transactionDate(sms.body) ?? sms.timestamp,
       source: 'SMS',
-      bankName: bankNames[code],
+      bankName: sourceName,
       instrumentType: instrumentType,
       instrumentLast4: _instrumentLast4(sms.body, instrumentType),
       importRole: isCardPayment
@@ -121,6 +122,20 @@ class SmsParser {
       RegExp(r'\b(?:CREDIT\s+CARD|CC|CARD)\b').hasMatch(upper)
       ? FinancialInstrumentType.creditCard
       : FinancialInstrumentType.bankAccount;
+
+  static String _sourceName(
+    String institution,
+    FinancialInstrumentType instrumentType,
+  ) {
+    if (instrumentType != FinancialInstrumentType.creditCard) {
+      return institution;
+    }
+    final issuer = institution.replaceFirst(
+      RegExp(r'\s+Bank$', caseSensitive: false),
+      '',
+    );
+    return '$issuer Credit Card';
+  }
 
   static String? _instrumentLast4(String body, FinancialInstrumentType type) {
     final label = type == FinancialInstrumentType.creditCard
