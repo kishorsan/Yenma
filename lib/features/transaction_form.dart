@@ -103,6 +103,9 @@ class _TransactionFormState extends State<TransactionForm> {
         note: _note.text,
         source: widget.transaction?.source ?? 'MANUAL',
         bankName: widget.transaction?.bankName,
+        instrumentType: widget.transaction?.instrumentType,
+        instrumentLast4: widget.transaction?.instrumentLast4,
+        importRole: widget.transaction?.importRole,
         externalId: widget.transaction?.externalId,
         recipientKey: widget.transaction?.recipientKey,
       );

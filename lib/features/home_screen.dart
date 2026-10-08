@@ -11,11 +11,11 @@ import 'debts/debts_screen.dart';
 import 'debts/debt_form.dart';
 import 'bulk_categorization_screen.dart';
 import 'card_transactions_screen.dart';
-import 'feature_landing_screen.dart';
 import 'split/split_screen.dart';
 import 'monthly_plan_screen.dart';
 import 'subscriptions/subscriptions_screen.dart';
 import 'emi/emi_screen.dart';
+import 'loans/loan_screen.dart';
 
 class _YenmaDestination {
   const _YenmaDestination(this.icon, this.selectedIcon, this.label);
@@ -100,6 +100,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     MaterialPageRoute<void>(builder: (_) => EmiScreen(controller: controller)),
   );
 
+  void _openLoans() => Navigator.of(context).push(
+    MaterialPageRoute<void>(builder: (_) => LoanScreen(controller: controller)),
+  );
+
   Future<void> _editEmiGst() async {
     final current = await controller.loadGstBasisPoints();
     if (!mounted) return;
@@ -158,22 +162,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           .showSnackBar(const SnackBar(content: Text('EMI GST rate saved.')));
     }
   }
-
-  void _openDesignFeature({
-    required String title,
-    required IconData icon,
-    required String description,
-    required List<String> sections,
-  }) => Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      builder: (_) => FeatureLandingScreen(
-        title: title,
-        icon: icon,
-        description: description,
-        sections: sections,
-      ),
-    ),
-  );
 
   void _openDebts() => Navigator.of(context).push(
     MaterialPageRoute<void>(
@@ -647,16 +635,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         open: _openSubscriptions,
       ),
       (label: 'EMI', icon: Icons.event_repeat_outlined, open: _openEmis),
-      (
-        label: 'Loan',
-        icon: Icons.account_balance_outlined,
-        open: () => _openDesignFeature(
-          title: 'Loan',
-          icon: Icons.account_balance_outlined,
-          description: 'Track borrowing, balances, and repayment schedules.',
-          sections: const ['Loan cards', 'Payment schedule', 'Loan details'],
-        ),
-      ),
+      (label: 'Loan', icon: Icons.account_balance_outlined, open: _openLoans),
       (label: 'Debt', icon: Icons.handshake_outlined, open: _openDebts),
     ];
     return Column(

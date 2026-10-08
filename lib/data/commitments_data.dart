@@ -77,6 +77,13 @@ abstract interface class EmiRepository {
   Future<void> saveGstBasisPoints(int basisPoints);
 }
 
+abstract interface class LoanRepository {
+  Future<int> saveLoan(LoanRecord value);
+  Future<List<LoanRecord>> loans();
+  Future<List<LoanTrackingRecord>> loanPayments(int loanId);
+  Future<void> saveLoanPayment(LoanTrackingRecord value);
+}
+
 class EmiRecord {
   const EmiRecord({
     this.id,
@@ -154,6 +161,7 @@ class SubscriptionRecord {
 class LoanRecord {
   const LoanRecord({
     this.id,
+    this.name = 'Loan',
     required this.totalAmountPaise,
     this.amountPaidPaise = 0,
     this.note = '',
@@ -164,6 +172,7 @@ class LoanRecord {
     this.isEmi = false,
   });
   final int? id;
+  final String name;
   final int totalAmountPaise;
   final int amountPaidPaise;
   final String note;
@@ -172,6 +181,10 @@ class LoanRecord {
   final LoanStatus status;
   final LoanType type;
   final bool isEmi;
+
+  int get remainingPaise =>
+      (totalAmountPaise - amountPaidPaise).clamp(0, totalAmountPaise);
+  bool get isComplete => remainingPaise == 0;
 }
 
 class LoanTrackingRecord {
@@ -193,7 +206,8 @@ class LoanTrackingRecord {
   final bool isPaid;
 }
 
-class CommitmentsRepository implements SubscriptionRepository, EmiRepository {
+class CommitmentsRepository
+    implements SubscriptionRepository, EmiRepository, LoanRepository {
   const CommitmentsRepository(this.db);
   final Database db;
 
@@ -234,21 +248,108 @@ class CommitmentsRepository implements SubscriptionRepository, EmiRepository {
           )
           .toList();
 
-  Future<int> saveLoan(LoanRecord value) => db.insert('loans', {
-    if (value.id != null) 'id': value.id,
-    'total_amount_paise': value.totalAmountPaise,
-    'amount_paid_paise': value.amountPaidPaise,
-    'note': value.note.trim(),
-    'start_date': value.startDate.toIso8601String(),
-    'end_date': value.endDate?.toIso8601String(),
-    'status': value.status == LoanStatus.pending ? 'PENDING' : 'FULLY_PAID',
-    'loan_type': switch (value.type) {
-      LoanType.revolving => 'REVOLVING',
-      LoanType.oneTime => 'ONE_TIME',
-      LoanType.emiAmortizing => 'EMI_AMORTIZING',
+  @override
+  Future<int> saveLoan(LoanRecord value) async {
+    if (value.name.trim().isEmpty ||
+        value.totalAmountPaise <= 0 ||
+        value.amountPaidPaise < 0 ||
+        value.amountPaidPaise > value.totalAmountPaise ||
+        (value.endDate != null && value.endDate!.isBefore(value.startDate))) {
+      throw ArgumentError('Invalid loan');
+    }
+    final row = <String, Object?>{
+      'emi_name': value.name.trim(),
+      'total_amount_paise': value.totalAmountPaise,
+      'amount_paid_paise': value.amountPaidPaise,
+      'note': value.note.trim(),
+      'start_date': value.startDate.toIso8601String(),
+      'end_date': value.endDate?.toIso8601String(),
+      'status': value.isComplete ? 'FULLY_PAID' : 'PENDING',
+      'loan_type': switch (value.type) {
+        LoanType.revolving => 'REVOLVING',
+        LoanType.oneTime => 'ONE_TIME',
+        LoanType.emiAmortizing => 'EMI_AMORTIZING',
+      },
+      'is_emi': value.isEmi ? 1 : 0,
+    };
+    if (value.id == null) return db.insert('loans', row);
+    await db.update('loans', row, where: 'id = ?', whereArgs: [value.id]);
+    return value.id!;
+  }
+
+  @override
+  Future<List<LoanRecord>> loans() async => (await db.query(
+    'loans',
+    where: 'is_emi = 0',
+    orderBy: "CASE status WHEN 'PENDING' THEN 0 ELSE 1 END, start_date DESC, id DESC",
+  )).map(_loanFromRow).toList();
+
+  LoanRecord _loanFromRow(Map<String, Object?> row) => LoanRecord(
+    id: row['id'] as int,
+    name: row['emi_name'] as String,
+    totalAmountPaise: row['total_amount_paise'] as int,
+    amountPaidPaise: row['amount_paid_paise'] as int,
+    note: row['note'] as String,
+    startDate: DateTime.parse(row['start_date'] as String),
+    endDate: row['end_date'] == null
+        ? null
+        : DateTime.parse(row['end_date'] as String),
+    status: row['status'] == 'FULLY_PAID'
+        ? LoanStatus.fullyPaid
+        : LoanStatus.pending,
+    type: switch (row['loan_type']) {
+      'REVOLVING' => LoanType.revolving,
+      'ONE_TIME' => LoanType.oneTime,
+      _ => LoanType.emiAmortizing,
     },
-    'is_emi': value.isEmi ? 1 : 0,
-  }, conflictAlgorithm: ConflictAlgorithm.replace);
+  );
+
+  @override
+  Future<List<LoanTrackingRecord>> loanPayments(int loanId) async =>
+      (await db.query(
+            'loan_tracking',
+            where: 'loan_id = ?',
+            whereArgs: [loanId],
+            orderBy: 'date DESC, id DESC',
+          ))
+          .map(
+            (row) => LoanTrackingRecord(
+              id: row['id'] as int,
+              loanId: row['loan_id'] as int,
+              principalPaise: row['principal_paise'] as int,
+              interestPaise: row['interest_paise'] as int,
+              gstPaise: row['gst_paise'] as int,
+              date: DateTime.parse(row['date'] as String),
+              isPaid: row['is_paid'] == 1,
+            ),
+          )
+          .toList();
+
+  @override
+  Future<void> saveLoanPayment(LoanTrackingRecord value) async {
+    if (value.principalPaise < 0 ||
+        value.interestPaise < 0 ||
+        value.gstPaise < 0 ||
+        value.principalPaise + value.interestPaise + value.gstPaise <= 0) {
+      throw ArgumentError('Invalid loan payment');
+    }
+    final records = await db.query(
+      'loans',
+      columns: ['start_date', 'end_date'],
+      where: 'id = ? AND is_emi = 0',
+      whereArgs: [value.loanId],
+      limit: 1,
+    );
+    if (records.isEmpty) throw StateError('Loan no longer exists');
+    final start = DateTime.parse(records.single['start_date'] as String);
+    final endValue = records.single['end_date'] as String?;
+    final end = endValue == null ? null : DateTime.parse(endValue);
+    if (value.date.isBefore(start) ||
+        (end != null && value.date.isAfter(end))) {
+      throw ArgumentError('Payment date is outside the loan date range');
+    }
+    await saveLoanTracking(value);
+  }
 
   Future<void> saveLoanTracking(LoanTrackingRecord value) async {
     await db.transaction((txn) async {

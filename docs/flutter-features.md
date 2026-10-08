@@ -1,10 +1,10 @@
 # Yenma Flutter: features, use cases, and problems solved
 
-Reviewed 12 September 2026 against the current Flutter working tree, including uncommitted Dart changes. App version in pubspec.yaml: 0.2.2+4. This is a source-based inventory, not a device verification or a claim about an installed build. No Kotlin source or Kotlin Gradle scripts were inspected or changed.
+Reviewed 8 October 2026 against the current Flutter working tree, including uncommitted Dart changes. App version in pubspec.yaml: 0.2.2+4. This is a source-based inventory, not a device verification or a claim about an installed build. No Kotlin source or Kotlin Gradle scripts were inspected or changed.
 
 Earlier debt and split proposals are tracked in [debt-experience-proposal.md](debt-experience-proposal.md). Reusable split groups and the conversational split flow are now implemented; other proposal items remain subject to their source evidence and open questions.
 
-**Product purpose inferred from the implementation:** help an individual keep a local record of money coming in and going out, understand monthly spending, and remember money owed between people. The app has four destinations: Overview, Transactions, Debts, and Settings. No account registration is required by the Flutter flow.
+**Product purpose inferred from the implementation:** help an individual keep a local record of money coming in and going out, understand monthly spending, and remember money owed between people. The app has four destinations: Home, Cards, Categorize, and Settings. No account registration is required by the Flutter flow.
 
 The tables describe existing Flutter behavior. The use cases and problems are interpretations of that behavior, not confirmed product research. Open questions below identify where those interpretations are insufficient to establish intent.
 
@@ -20,7 +20,7 @@ Evidence: [home screen](../lib/features/home_screen.dart), [money calculations](
 | F04 | Top three expense categories, sorted by amount, with proportional bars. | Notice that Food dominates the month's spending. | Identify the largest spending areas quickly. There is no full category analytics screen. |
 | F05 | Five most recent entries in the selected month and a View all shortcut. | Check whether a recently entered payment appears. | Review recent activity without opening the full list. |
 | F06 | Full selected-month transaction list, newest date first, then newest ID for ties; shows title, category, date, type, and amount. | Review every recorded payment in a month. | Provide a consistent, readable history. No transaction text search or extra filters are exposed. |
-| F07 | Previous/next month controls; tapping the month label returns to the current month. | Review an older month, then return to today’s month. | Navigate historical records without changing the data. |
+| F07 | Home has no month control. Cards has previous/next month controls and a current-month shortcut. Categorize has no month selector and uses one continuous recent feed from the previous calendar month's first day through today. | Review an older card ledger while keeping recent categorization work continuously visible without changing periods. | Keeps explicit month navigation in Cards and removes period switching from Home and Categorize. Cards and Home share the controller-selected month; Categorize uses an independent fixed date window. |
 | F08 | Pull to refresh for ledger and debts; reload month and debts on app resume. | Return to the app and see freshly loaded records. | Reduce stale displayed information. Ledger refresh reloads the database; it does not trigger SMS import. |
 
 ## Recording and correcting transactions
@@ -40,6 +40,17 @@ Evidence: [transaction form](../lib/features/transaction_form.dart), [details](.
 | F17 | Validate amount/title/category; retain form values after failed saves; disable conflicting actions while saving. | Fix invalid input or retry after a storage error. | Prevent incomplete entries and avoid having to retype a failed submission. |
 
 Preset categories: expenses use Food, Groceries, Transport, Shopping, Health, Entertainment, Bills, Subscriptions, Education, or Other; income uses Salary, Investment, or Other; transfers use Transfer.
+
+## Bulk categorization
+
+Evidence: [categorization screen](../lib/features/bulk_categorization_screen.dart), [controller](../lib/app/money_controller.dart), [repository](../lib/data/money_repository.dart).
+
+| ID | Existing feature and behavior | Example use case | Problem it solves |
+| --- | --- | --- | --- |
+| F65 | Categorize has no month selector. It requests one repository range from the previous calendar month's first day (inclusive) to tomorrow (exclusive), making today inclusive while excluding future-dated records. SQLite applies `date >= ? AND date < ?` and orders the feed by date descending, then ID descending; the screen preserves that deterministic newest-first order. | Classify all recent imports in one list even when the useful window crosses a month boundary. | Keeps the categorization queue continuous, recent, and independent of the month selected in Cards/Home. Older records and future-dated records are deliberately outside this feed. |
+| F66 | Select any combination of transactions within one transaction kind. After the first selection, rows of other kinds are disabled; selected rows can be toggled individually or all cleared. | Select several unrelated expenses, while preventing an income-only category from being applied to them accidentally. | Supports deliberate bulk work without requiring matching merchant names and preserves category-kind validity. |
+| F67 | A bottom action chip slides and fades into view with the selection count. It opens a draggable, dismissible category-grid sheet containing only categories valid for the selected transaction kind. Dragging or dismissing the sheet pauses the action and leaves the selection intact. | Inspect category options, dismiss the sheet to reconsider the selection, then reopen it without starting over. | Separates transaction selection from the commit decision and makes dismissal non-destructive. |
+| F68 | Tapping a category immediately applies it atomically to the selected transactions, closes the sheet, clears selection after success, reloads the continuous recent feed, and shows completion feedback. A failed update retains the selection and exposes retryable error feedback. | Reclassify several recent expenses with one category tap and immediately see the refreshed list. | Reduces repetitive edits while keeping failure recoverable. Recipient-linked category learning continues through the existing bulk repository operation. |
 
 ## Shared expenses and debts
 
@@ -87,14 +98,14 @@ These workflows exist in Dart, including currently uncommitted changes. Reading 
 
 | ID | Existing Flutter behavior | Example use case | Problem it solves |
 | --- | --- | --- | --- |
-| F35 | Sync bank messages action on Overview, Transactions, and Debts; first-use consent dialog; busy indicator and completion/permission/error messages. | Import payments without typing them individually. | Reduce manual entry while explaining message access. |
+| F35 | Home-only Sync bank messages action; first-use consent dialog; busy indicator and completion/permission/error messages. | Import payments without typing them individually. | Reduce manual entry while explaining message access without repeating the action across destinations. |
 | F36 | First successful sync requests roughly three calendar months of messages; later syncs request today’s messages up to now. | Seed recent history, then collect today’s activity. | Reduce repeated scanning. This is not catch-up from the last successful sync; missed days can remain unimported. |
-| F37 | Parse supported bank-like text into amount, income/expense, recipient-derived title, bank, date, and SMS origin. Unrecognized messages are skipped; default category is Other. | Turn a recognized debit alert into a draftless ledger entry. | Convert message text into structured records. There is no review queue before insertion. |
+| F37 | Parse supported bank-like text into amount, income/expense/transfer, recipient-derived title, bank, transaction date, SMS origin, account/card type, and masked four-digit instrument identity. Card purchases and successful card AutoPay messages are expenses; card-bill receipts are transfers; future “will be debited” notices are skipped. Other recognized-bank messages use the same generic instrument rules. | Keep an HDFC card purchase separate from an HDFC bank-account debit and avoid treating a card-bill payment as income. | Convert message text into structured records without mixing cards and accounts or counting a pending charge as completed. There is no review queue before insertion. |
 | F38 | Store an import identity derived from sender, timestamp, and body; skip existing matching identities on import. | Tap sync again without reinserting the same recognized message. | Reduce repeated imports. This does not reconcile manual entries with SMS entries or remember deleted imports. |
 | F39 | Ordinary save of a transaction with a recipient key stores its category for subsequent imports with that key. | Categorize an imported merchant once and reuse the choice later. | Reduce repeated categorization. No rule-management screen exists; saving through the split-expense path bypasses this category-learning write. |
 | F40 | On initialization, request daily scheduling through the platform channel; with saved consent, at/after 22:00, perform a foreground sync if today is not marked synced. | Attempt to keep records current with less manual effort. | Intended benefit is freshness; the exact automatic-sync promise is unresolved. Native timing and delivery are unverified. |
 
-The parser contains names for HDFC Bank, Canara Bank, Jupiter, ICICI Bank, SBI, Axis Bank, Kotak Mahindra Bank, IDFC FIRST Bank, Bank of India, Punjab National Bank, Central Bank of India, and Union Bank. This is a string-matching list, not verified comprehensive bank support. It takes the first INR/Rs/₹ amount, treats mixed credit/debit keywords as an expense, and does not infer transfers. Overlapping bank keys and free-form recipient extraction can misidentify records. No bank tracking controls or raw-message viewer exist in Flutter.
+The parser contains names for HDFC Bank, Canara Bank, Jupiter, ICICI Bank, SBI, Axis Bank, Kotak Mahindra Bank, IDFC FIRST Bank, Bank of India, Punjab National Bank, Central Bank of India, and Union Bank. This is a string-matching list, not verified comprehensive bank support. It takes the first INR/Rs/₹ amount and uses generic `card`/`credit card`/`CC` versus `A/C`/`account` markers; exact wording from an untested bank can still be missed. Card-bill transfers are classified but not automatically reconciled with their corresponding bank debit. No bank tracking controls or raw-message viewer exist in Flutter.
 
 ## Appearance, local storage, and usability
 
@@ -105,7 +116,7 @@ Evidence: [welcome screen](../lib/features/welcome_screen.dart), [app compositio
 | F41 | Light, dark, and follow-system appearance; preference saved locally. | Keep the app comfortable in different lighting. | Support visual preference without reselecting it each launch. |
 | F42 | Random welcome phrase once per launch, automatic continuation after two seconds, immediate Open my money action. Accessible-navigation mode requires manual continuation. | Enter the app through a short branded welcome. | Likely a tone/branding choice; a specific user problem is unconfirmed. Manual continuation prevents the text disappearing while being read. |
 | F43 | Bottom navigation on narrow layouts, navigation rail on wider layouts, constrained content width, and stacking summary cards for larger text. | Use a wider screen or larger text setting. | Keep navigation and financial values readable across supported layouts. This does not establish platform support or certify full accessibility. |
-| F44 | Local SQLite persistence for entries, debts, receipts, names, categories, plans, split groups, commitments, and preferences; current schema is version 15 with upgrade paths. | Close and reopen the app without losing saved records. | Preserve history and preferences locally and support upgrading existing Yenma databases. No export, backup, or restore UI exists. |
+| F44 | Local SQLite persistence for entries, debts, receipts, names, categories, plans, split groups, commitments, and preferences; current schema is version 16 with upgrade paths. Imported transactions retain account/card identity and import role. | Close and reopen the app without losing saved records. | Preserve history and preferences locally and support upgrading existing Yenma databases. No export, backup, or restore UI exists. |
 | F45 | Exact integer-paise money handling and Indian rupee formatting. | Record ₹123.45 without floating-point rounding drift. | Keep stored amounts and aggregation exact to the paise. INR is fixed, not a currency selector. |
 | F46 | Empty/loading/error states, retry actions, and protection against older asynchronous loads overwriting newer selections. | Switch months quickly or retry a failed read. | Explain absent data and avoid showing the wrong selection’s results. |
 | F47 | Settings displays INR, local-storage/no-account information, and app version. | Check the app’s currency and basic storage model. | Set expectations about how records are handled. These labels are informational controls, not editable preferences. |
@@ -131,6 +142,17 @@ Evidence: [EMI screens](../lib/features/emi/emi_screen.dart), [commitment persis
 | F58 | Show total principal remaining, active EMIs first, and completed EMIs afterward. An EMI completes when its paid monthly principal reaches the original principal. | See the outstanding financed amount and find current commitments before historical ones. | Avoids manually calculating principal remaining across installments. |
 | F59 | Record each monthly EMI as principal plus interest, paid or due. GST is calculated automatically on interest using the configurable Settings rate and stored on the installment. | Record ₹1,000 principal and ₹100 interest with 18% GST as a ₹1,118 monthly EMI. | Makes the EMI’s components and tax explicit while preserving the historical GST amount if the configured rate changes later. |
 | F60 | Restrict EMI billing days and EMI-related date selection to days 1–28. Reject negative component and processing-fee values, require a positive original principal, and prevent paid principal from exceeding the original amount. | Use a recurrence day that exists in every month and catch an accidental overpayment. | Prevents invalid monthly schedules and contradictory balances. Principal or interest may individually be zero, but a monthly EMI cannot have both at zero. |
+
+## Loans
+
+Evidence: [loan screens](../lib/features/loans/loan_screen.dart), [commitment persistence](../lib/data/commitments_data.dart), [controller](../lib/app/money_controller.dart).
+
+| ID | Existing feature and behavior | Example use case | Problem it solves |
+| --- | --- | --- | --- |
+| F61 | Record and edit a loan with a lender/name, original amount, repayment type, start date, optional expected end date, and notes. Supported types are revolving credit, single repayment, and regular repayments. | Track a bank vehicle loan or an informal one-time loan. | Keeps the essential terms and identity of different borrowing arrangements in one local record. Loan records do not create ledger transactions. |
+| F62 | Browse active and completed loan cards with total outstanding principal, per-loan remaining balance, and principal repayment progress. EMI records remain separate from this list. | Check the total principal still owed across active loans. | Provides a portfolio-level balance without double-counting the separate EMI feature. |
+| F63 | Add or edit scheduled and paid repayment entries with principal, interest, optional fees/charges, and a payment or due date. Only paid principal reduces the balance and a loan completes when paid principal reaches the original amount. | Add next month's due amount now, then mark it paid later. | Combines a lightweight payment schedule with repayment history while keeping interest and charges out of principal progress. |
+| F64 | Validate positive loan totals, chronological date ranges, non-negative payment components, payment dates within the loan range, and cumulative paid principal that does not exceed the original amount. | Catch an accidental payment that would overpay principal. | Prevents contradictory loan balances and invalid schedules. |
 
 ## Product intent that needs confirmation
 

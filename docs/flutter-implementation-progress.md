@@ -60,14 +60,20 @@ These requirements come from the current product conversation and supplied UI pl
 ### Transactions, categorization, and bank/card data
 
 - **Implemented:** The transaction ledger supports month navigation, add/edit/details/delete, income/expense/transfer types, receipt storage, and transaction-category summaries.
-- **Implemented:** [`BulkCategorizationScreen`](../lib/features/bulk_categorization_screen.dart) is embedded as the third primary destination. It supports selection, same-name grouped selection, transaction-kind-safe category choices, bulk apply, saving/error states, and success feedback. Category selection can be learned for later imports through the repository flow.
-- **Planned enhancement:** A distinct uncategorized-first filter, explicit select-all control, and categorized-history mode are not present in this slice.
+- **Implemented:** [`BulkCategorizationScreen`](../lib/features/bulk_categorization_screen.dart) is embedded as the third primary destination and manages one continuous recent transaction feed independently of the shared Home/Cards month state. It has no month selector.
+- **Implemented:** The repository exposes `transactionsBetween(startInclusive, endExclusive)`. Its SQLite implementation performs one explicit `date >= ? AND date < ?` query ordered by date descending and then ID descending.
+- **Implemented:** Categorize calls that range API with the previous calendar month's first day and tomorrow, making today inclusive while excluding earlier and future-dated records. The screen retains deterministic newest-date/highest-ID ordering and discards stale asynchronous loads by generation.
+- **Implemented:** Selection is arbitrary rather than merchant-name grouped. The first selected transaction fixes the active transaction kind; any other rows of that kind may be selected individually, while other kinds are visually disabled to keep category choices valid.
+- **Implemented:** A count-bearing bottom action chip animates into view through slide and opacity transitions. It opens a draggable/dismissible modal grid on semantic `surfaceContainer`/`surfaceContainerHigh` theme surfaces and filters categories by the selected kind.
+- **Implemented:** Dismissing or dragging down the category sheet is a pause action: it does not clear the selected transaction IDs or kind. Tapping a category closes the sheet and starts the bulk update immediately; success clears selection, reloads the Categorize month, and reports the changed count. Failure retains the selection and presents retryable error feedback.
+- **Implemented:** Category identity colors remain data-driven inside the otherwise grey semantic surfaces. Learned recipient categories continue through the existing bulk repository write.
+- **Not implemented:** A distinct uncategorized-first filter, explicit select-all control, and categorized-history mode are not present.
 - **Implemented foundation:** The schema contains canonical bank records and transaction `bank_id` references, including tracking and credit-card flags. SMS imports also preserve bank attribution.
-- **Implemented:** [`CardTransactionsScreen`](../lib/features/card_transactions_screen.dart) is the second primary destination. It derives recognized bank/card choices from the selected month's transaction `bankName` values, filters the ledger by the selected name, shows the filtered expense total and count, supports month navigation and refresh, and opens transaction details.
+- **Implemented:** SMS imports classify recognized messages as bank-account or credit-card activity, retain a masked four-digit instrument identity when present, and classify purchases, account debits/credits, and card-bill payments. HDFC purchase, successful AutoPay, card-payment, account debit/credit, and pending-debit formats have regression coverage; generic instrument rules also have ICICI and SBI coverage. Exact formats from other banks remain unverified until representative messages are available.
+- **Implemented:** [`CardTransactionsScreen`](../lib/features/card_transactions_screen.dart) is the second primary destination. It uses only credit-card transactions, groups choices by bank plus masked card identity, shows the filtered expense total and count, supports month navigation and refresh, and opens transaction details. Card-bill payments remain visible but are transfers and therefore do not inflate spending.
 - **Implemented:** Home derives a horizontally scrollable bank-summary carousel from recognized `bankName` values. Each card shows monthly entry count and expense total; when no recognized bank is present, Home explains that SMS sync can populate the area. Tapping a summary opens the Cards destination, but does not yet carry that bank as the selected filter.
-- **Implemented limitation:** The default “All cards” view currently uses the complete selected-month transaction list, including transactions without recognized bank attribution, even though its summary label says “All recognized cards.” This wording/data-scope mismatch requires correction.
-- **Implemented limitation:** Card choices are currently derived from transaction bank names rather than the canonical bank repository or distinct card/account identifiers.
-- **Unresolved:** The product identity and relationship among a bank, a bank account, and a credit card must be made explicit before card-specific totals become authoritative.
+- **Implemented limitation:** Instrument identity is inferred from message wording and an optional masked suffix rather than managed through a user-facing account/card catalogue. Older imported HDFC rows cannot be safely reclassified because raw SMS bodies were not retained.
+- **Unresolved:** A card-bill receipt and its corresponding bank debit are both transfers but are not automatically reconciled into one logical movement.
 
 ### Plan
 
@@ -129,7 +135,7 @@ Milestones follow the user-visible priority while allowing shared foundations to
 | M1: Theme foundation | **Implemented, verification remaining** | Grey-first light/dark `ColorScheme` and semantic `YenmaColors` roles are present. Complete the pre-existing-widget color audit and add representative theme/contrast tests. |
 | M2: Shell and Home | **Implemented, verification remaining** | Four primary destinations, Home-only top-right SMS sync, bank carousel, ordered six-feature grid, and responsive rail are present. Add navigation/widget tests and visual checks for loading, empty, populated, busy, and error states. |
 | M3: Card Specific Transactions | **Functional first slice** | Bank-name selection, selected-month total/list, month navigation, refresh, empty/error states, and transaction-detail reuse are present. Correct all-card scope/labeling, decide bank/account/card identity, preserve carousel selection when navigating, and add tests. |
-| M4: Categorize | **Functional first slice** | Embedded primary destination, grouped multi-selection, bulk apply, kind-safe categories, feedback, and retry state are present. Add uncategorized-first filtering, select-all/history if confirmed, and navigation/widget tests. |
+| M4: Categorize | **Continuous-feed implementation verified** | One SQLite-backed inclusive-start/exclusive-end query covers the previous month's first day through today, excludes future dates, and returns date/ID descending order. Arbitrary same-kind multi-selection, animated action chip, dismissible category grid, selection preservation, immediate apply/reload, semantic surfaces, feedback, and retry state are present. The repository boundary and no-selector behavior pass focused and full-suite verification; uncategorized-first, select-all, and history remain absent. |
 | M5: Plan | **Functional flow, redesign remaining** | Existing two-step plan flow and Home route work. Complete the plan-card/list design, selection/edit presentation, semantic visual review, and navigation tests. |
 | M6: Split | **Functional first slice** | Group creation, newest-first chat history, equal/custom participant shares, payer impersonation, atomic persistence, Debt integration, and focused repository/widget tests are present. Group/split editing, direct settlement controls, and reimbursement reconciliation remain. |
 | M7: Subscriptions | **Design shell; functional work planned** | Build active/inactive list, add/edit, billing period/day, provider link, upcoming ordering, and explicit tracking semantics with persistence and widget coverage. |
@@ -139,8 +145,9 @@ Milestones follow the user-visible priority while allowing shared foundations to
 
 ## Verification for the current slice
 
-- **Verified:** `flutter analyze` completes cleanly.
-- **Verified:** The full Flutter test suite passes: 47 tests.
+- **Verified on 8 October 2026:** `flutter analyze` reports no issues with the final range-query Categorize implementation.
+- **Verified on 8 October 2026:** The focused repository/categorization/navigation suite passes 14 of 14, including inclusive-start/exclusive-end repository boundaries and the absence of Categorize month controls.
+- **Verified on 8 October 2026:** The full Flutter test suite passes 65 of 65.
 - **Verified:** The two dedicated preview tests pass: 2 of 2.
 - **Verified:** The targeted welcome tests pass: 3 of 3.
 - **Verified:** [`home_navigation_test.dart`](../test/home_navigation_test.dart) asserts that Home has neither Previous month nor Next month tooltips and that the Cards destination retains both controls.
@@ -222,6 +229,16 @@ These questions are tracked explicitly so planned behavior is not accidentally d
 10. Which additional themes are intended beyond the initial grey design and the existing system/light/dark modes?
 
 ## Change log
+
+### 8 October 2026 — bulk categorization interaction redesign
+
+- Decoupled Categorize from the shared Home/Cards month state and removed its month selector. One feed spans from the previous calendar month's first day through today inclusive and excludes future-dated records.
+- Added `transactionsBetween(startInclusive, endExclusive)` and backed the feed with one SQLite `date >= ? AND date < ?` query ordered by date and ID descending. Categorize passes the previous month's first day and tomorrow.
+- Added arbitrary multi-select constrained to one transaction kind.
+- Replaced the inline category field with an animated bottom action chip and a draggable/dismissible category grid sheet.
+- Preserved selections when the sheet is dismissed, while category taps now apply immediately, close, clear after success, and reload the continuous recent feed.
+- Adopted semantic grey theme surfaces around data-driven category identity colors.
+- Added a repository boundary test and verified the final range-query/no-selector behavior with clean Flutter analysis, the focused repository/categorization/navigation suite at 14 of 14, and the full Flutter suite at 65 of 65.
 
 ### 3 October 2026 — baseline established
 

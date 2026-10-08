@@ -94,7 +94,7 @@ void main() {
     );
     await old.close();
     await repository.initialize();
-    expect(await repository.debtDatabase.getVersion(), 15);
+    expect(await repository.debtDatabase.getVersion(), 16);
     expect((await repository.transactionById(42))!.amountPaise, 50000);
     expect((await repository.categories()).first.id, 1);
     expect(await repository.loadTheme(), 'dark');

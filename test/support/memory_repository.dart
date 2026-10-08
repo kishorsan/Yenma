@@ -19,6 +19,8 @@ class MemoryRepository implements MoneyRepository {
   final List<SubscriptionRecord> savedSubscriptions = [];
   final List<EmiRecord> savedEmis = [];
   final List<EmiInstallment> savedEmiInstallments = [];
+  final List<LoanRecord> savedLoans = [];
+  final List<LoanTrackingRecord> savedLoanPayments = [];
   int gstBasisPoints = 1800;
   String theme = 'system';
   bool smsConsent = false;
@@ -53,6 +55,23 @@ class MemoryRepository implements MoneyRepository {
           final date = b.date.compareTo(a.date);
           return date == 0 ? b.id!.compareTo(a.id!) : date;
         });
+
+  @override
+  Future<List<MoneyTransaction>> transactionsBetween(
+    DateTime startInclusive,
+    DateTime endExclusive,
+  ) async =>
+      entries
+          .where(
+            (entry) =>
+                !entry.date.isBefore(startInclusive) &&
+                entry.date.isBefore(endExclusive),
+          )
+          .toList()
+        ..sort((a, b) {
+          final date = b.date.compareTo(a.date);
+          return date == 0 ? b.id!.compareTo(a.id!) : date;
+        });
   @override
   Future<void> save(MoneyTransaction transaction) async {
     if (failSave) throw StateError('Disk full');
@@ -69,6 +88,9 @@ class MemoryRepository implements MoneyRepository {
         note: transaction.note,
         source: transaction.source,
         bankName: transaction.bankName,
+        instrumentType: transaction.instrumentType,
+        instrumentLast4: transaction.instrumentLast4,
+        importRole: transaction.importRole,
         externalId: transaction.externalId,
         recipientKey: transaction.recipientKey,
       ),
@@ -143,6 +165,97 @@ class MemoryRepository implements MoneyRepository {
       return month == 0 ? a.billingDay.compareTo(b.billingDay) : month;
     });
     return result;
+  }
+
+  @override
+  Future<int> saveLoan(LoanRecord value) async {
+    if (failSave) throw StateError('Disk full');
+    if (value.name.trim().isEmpty ||
+        value.totalAmountPaise <= 0 ||
+        value.amountPaidPaise > value.totalAmountPaise ||
+        (value.endDate != null && value.endDate!.isBefore(value.startDate))) {
+      throw ArgumentError('Invalid loan');
+    }
+    final id = value.id ?? ++_id;
+    final saved = LoanRecord(
+      id: id,
+      name: value.name.trim(),
+      totalAmountPaise: value.totalAmountPaise,
+      amountPaidPaise: value.amountPaidPaise,
+      note: value.note.trim(),
+      startDate: value.startDate,
+      endDate: value.endDate,
+      status: value.amountPaidPaise >= value.totalAmountPaise
+          ? LoanStatus.fullyPaid
+          : LoanStatus.pending,
+      type: value.type,
+    );
+    savedLoans.removeWhere((item) => item.id == id);
+    savedLoans.add(saved);
+    return id;
+  }
+
+  @override
+  Future<List<LoanRecord>> loans() async => List.of(savedLoans)
+    ..sort((a, b) {
+      final state = (a.isComplete ? 1 : 0).compareTo(b.isComplete ? 1 : 0);
+      return state == 0 ? b.startDate.compareTo(a.startDate) : state;
+    });
+
+  @override
+  Future<List<LoanTrackingRecord>> loanPayments(int loanId) async =>
+      savedLoanPayments.where((item) => item.loanId == loanId).toList()
+        ..sort((a, b) => b.date.compareTo(a.date));
+
+  @override
+  Future<void> saveLoanPayment(LoanTrackingRecord value) async {
+    if (failSave) throw StateError('Disk full');
+    final loan = savedLoans
+        .where((item) => item.id == value.loanId)
+        .firstOrNull;
+    if (loan == null ||
+        value.principalPaise < 0 ||
+        value.interestPaise < 0 ||
+        value.gstPaise < 0 ||
+        value.principalPaise + value.interestPaise + value.gstPaise <= 0 ||
+        value.date.isBefore(loan.startDate) ||
+        (loan.endDate != null && value.date.isAfter(loan.endDate!))) {
+      throw ArgumentError('Invalid loan payment');
+    }
+    final id = value.id ?? ++_id;
+    final otherPaid = savedLoanPayments
+        .where(
+          (item) => item.loanId == value.loanId && item.id != id && item.isPaid,
+        )
+        .fold<int>(0, (sum, item) => sum + item.principalPaise);
+    final paid = otherPaid + (value.isPaid ? value.principalPaise : 0);
+    if (paid > loan.totalAmountPaise) throw ArgumentError('Overpayment');
+    savedLoanPayments.removeWhere((item) => item.id == id);
+    savedLoanPayments.add(
+      LoanTrackingRecord(
+        id: id,
+        loanId: value.loanId,
+        principalPaise: value.principalPaise,
+        interestPaise: value.interestPaise,
+        gstPaise: value.gstPaise,
+        date: value.date,
+        isPaid: value.isPaid,
+      ),
+    );
+    final index = savedLoans.indexWhere((item) => item.id == value.loanId);
+    savedLoans[index] = LoanRecord(
+      id: loan.id,
+      name: loan.name,
+      totalAmountPaise: loan.totalAmountPaise,
+      amountPaidPaise: paid,
+      note: loan.note,
+      startDate: loan.startDate,
+      endDate: loan.endDate,
+      status: paid >= loan.totalAmountPaise
+          ? LoanStatus.fullyPaid
+          : LoanStatus.pending,
+      type: loan.type,
+    );
   }
 
   @override
@@ -271,6 +384,9 @@ class MemoryRepository implements MoneyRepository {
         note: entry.note,
         source: entry.source,
         bankName: entry.bankName,
+        instrumentType: entry.instrumentType,
+        instrumentLast4: entry.instrumentLast4,
+        importRole: entry.importRole,
         externalId: entry.externalId,
         recipientKey: entry.recipientKey,
         hasReceipt: entry.hasReceipt,
@@ -325,6 +441,9 @@ class MemoryRepository implements MoneyRepository {
         note: entry.note,
         source: entry.source,
         bankName: entry.bankName,
+        instrumentType: entry.instrumentType,
+        instrumentLast4: entry.instrumentLast4,
+        importRole: entry.importRole,
         externalId: entry.externalId,
         recipientKey: entry.recipientKey,
         hasReceipt: true,

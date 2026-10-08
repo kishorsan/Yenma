@@ -20,10 +20,15 @@ abstract interface class MoneyRepository
         DebtRepository,
         SplitRepository,
         SubscriptionRepository,
-        EmiRepository {
+        EmiRepository,
+        LoanRepository {
   Future<void> initialize();
   Future<List<MoneyCategory>> categories();
   Future<List<MoneyTransaction>> transactions(DateTime month);
+  Future<List<MoneyTransaction>> transactionsBetween(
+    DateTime startInclusive,
+    DateTime endExclusive,
+  );
   Future<void> save(MoneyTransaction transaction);
   Future<List<MoneyPlan>> plansForMonth(DateTime month);
   Future<List<PlanType>> planTypes();
@@ -77,7 +82,7 @@ class SqliteMoneyRepository
     _database = await _factory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 15,
+        version: 16,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: (db, version) async {
           await _createMoneySchema(db);
@@ -202,6 +207,31 @@ class SqliteMoneyRepository
               'INTEGER NOT NULL DEFAULT 0 CHECK(gst_paise >= 0)',
             );
           }
+          if (oldVersion < 16) {
+            final transactionTable = await db.rawQuery(
+              "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'transactions'",
+            );
+            if (transactionTable.isNotEmpty) {
+              await _addColumnIfMissing(
+                db,
+                'transactions',
+                'instrument_type',
+                "TEXT CHECK(instrument_type IN ('bankAccount','creditCard'))",
+              );
+              await _addColumnIfMissing(
+                db,
+                'transactions',
+                'instrument_last4',
+                'TEXT',
+              );
+              await _addColumnIfMissing(
+                db,
+                'transactions',
+                'import_role',
+                "TEXT CHECK(import_role IN ('cardPurchase','accountDebit','accountCredit','cardPayment'))",
+              );
+            }
+          }
         },
       ),
     );
@@ -221,6 +251,20 @@ class SqliteMoneyRepository
   @override
   Future<List<SubscriptionRecord>> subscriptions({bool? active}) =>
       commitments.subscriptions(active: active);
+
+  @override
+  Future<int> saveLoan(LoanRecord value) => commitments.saveLoan(value);
+
+  @override
+  Future<List<LoanRecord>> loans() => commitments.loans();
+
+  @override
+  Future<List<LoanTrackingRecord>> loanPayments(int loanId) =>
+      commitments.loanPayments(loanId);
+
+  @override
+  Future<void> saveLoanPayment(LoanTrackingRecord value) =>
+      commitments.saveLoanPayment(value);
 
   @override
   Future<int> saveEmi(EmiRecord value) => commitments.saveEmi(value);
@@ -305,6 +349,9 @@ class SqliteMoneyRepository
       note TEXT NOT NULL DEFAULT '',
       source TEXT NOT NULL DEFAULT 'MANUAL',
       bank_name TEXT,
+      instrument_type TEXT CHECK(instrument_type IN ('bankAccount','creditCard')),
+      instrument_last4 TEXT,
+      import_role TEXT CHECK(import_role IN ('cardPurchase','accountDebit','accountCredit','cardPayment')),
       external_id TEXT,
       recipient_key TEXT,
       has_receipt INTEGER NOT NULL DEFAULT 0
@@ -447,6 +494,17 @@ class SqliteMoneyRepository
         ],
         orderBy: 'date DESC, id DESC',
       )).map(MoneyTransaction.fromRow).toList();
+
+  @override
+  Future<List<MoneyTransaction>> transactionsBetween(
+    DateTime startInclusive,
+    DateTime endExclusive,
+  ) async => (await _db.query(
+    'transactions',
+    where: 'date >= ? AND date < ?',
+    whereArgs: [dateTimeKey(startInclusive), dateTimeKey(endExclusive)],
+    orderBy: 'date DESC, id DESC',
+  )).map(MoneyTransaction.fromRow).toList();
 
   @override
   Future<void> save(MoneyTransaction transaction) async {

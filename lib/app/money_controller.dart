@@ -124,6 +124,9 @@ class MoneyController extends ChangeNotifier {
                   note: parsed.note,
                   source: parsed.source,
                   bankName: parsed.bankName,
+                  instrumentType: parsed.instrumentType,
+                  instrumentLast4: parsed.instrumentLast4,
+                  importRole: parsed.importRole,
                   externalId: parsed.externalId,
                   recipientKey: parsed.recipientKey,
                 ),
@@ -192,6 +195,16 @@ class MoneyController extends ChangeNotifier {
 
   Future<int> saveSubscription(SubscriptionRecord subscription) =>
       repository.saveSubscription(subscription);
+
+  Future<List<LoanRecord>> loans() => repository.loans();
+
+  Future<int> saveLoan(LoanRecord loan) => repository.saveLoan(loan);
+
+  Future<List<LoanTrackingRecord>> loanPayments(int loanId) =>
+      repository.loanPayments(loanId);
+
+  Future<void> saveLoanPayment(LoanTrackingRecord payment) =>
+      repository.saveLoanPayment(payment);
 
   Future<List<EmiRecord>> emis() => repository.emis();
 
@@ -384,6 +397,9 @@ class MoneyController extends ChangeNotifier {
         note: transaction.note,
         source: transaction.source,
         bankName: transaction.bankName,
+        instrumentType: transaction.instrumentType,
+        instrumentLast4: transaction.instrumentLast4,
+        importRole: transaction.importRole,
         externalId: transaction.externalId,
         recipientKey: transaction.recipientKey,
       ),

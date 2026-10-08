@@ -51,10 +51,7 @@ void main() {
 
     await tester.tap(find.text('Categorize'));
     await tester.pumpAndSettle();
-    expect(
-      find.text('There are no transactions in this month to categorize.'),
-      findsOneWidget,
-    );
+    expect(find.text('No recent transactions to categorize.'), findsOneWidget);
   });
 
   test('grey themes expose semantic finance colors', () {

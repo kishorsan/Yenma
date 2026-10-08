@@ -12,46 +12,43 @@ class CardTransactionsScreen extends StatefulWidget {
   final MoneyController controller;
 
   @override
-  State<CardTransactionsScreen> createState() =>
-      _CardTransactionsScreenState();
+  State<CardTransactionsScreen> createState() => _CardTransactionsScreenState();
 }
 
 class _CardTransactionsScreenState extends State<CardTransactionsScreen> {
-  String? _selectedBank;
+  String? _selectedCard;
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.controller,
     builder: (context, _) {
       final controller = widget.controller;
-      final bankNames = controller.transactions
-          .map((transaction) => transaction.bankName?.trim())
-          .whereType<String>()
-          .where((name) => name.isNotEmpty)
-          .toSet()
-          .toList()
-        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-      if (_selectedBank != null && !bankNames.contains(_selectedBank)) {
-        _selectedBank = null;
-      }
-      final recognizedTransactions = controller.transactions
-          .where(
-            (transaction) =>
-                transaction.bankName != null &&
-                transaction.bankName!.trim().isNotEmpty,
-          )
+      final cardTransactions = controller.transactions
+          .where((transaction) => transaction.isCreditCard)
           .toList();
-      final transactions = _selectedBank == null
-          ? recognizedTransactions
-          : controller.transactions
-                .where(
-                  (transaction) =>
-                      transaction.bankName?.trim() == _selectedBank,
-                )
+      final cards = <String, String>{};
+      for (final transaction in cardTransactions) {
+        cards[_cardKey(transaction)] = transaction.instrumentLabel;
+      }
+      final cardKeys = cards.keys.toList()
+        ..sort(
+          (left, right) =>
+              cards[left]!.toLowerCase().compareTo(cards[right]!.toLowerCase()),
+        );
+      if (_selectedCard != null && !cards.containsKey(_selectedCard)) {
+        _selectedCard = null;
+      }
+      final transactions = _selectedCard == null
+          ? cardTransactions
+          : cardTransactions
+                .where((transaction) => _cardKey(transaction) == _selectedCard)
                 .toList();
       final spending = transactions
           .where((transaction) => transaction.kind == TransactionKind.expense)
-          .fold<int>(0, (total, transaction) => total + transaction.amountPaise);
+          .fold<int>(
+            0,
+            (total, transaction) => total + transaction.amountPaise,
+          );
 
       return RefreshIndicator(
         onRefresh: () => controller.loadMonth(controller.month),
@@ -62,9 +59,8 @@ class _CardTransactionsScreenState extends State<CardTransactionsScreen> {
           children: [
             Text(
               'Card specific transactions',
-              style: Theme.of(
-                context,
-              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
+              style: Theme.of(context).textTheme.headlineSmall
+                  ?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 6),
             Text(
@@ -74,22 +70,22 @@ class _CardTransactionsScreenState extends State<CardTransactionsScreen> {
             const SizedBox(height: 16),
             _monthSelector(context),
             const SizedBox(height: 16),
-            if (bankNames.isNotEmpty)
+            if (cardKeys.isNotEmpty)
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
                   children: [
                     ChoiceChip(
                       label: const Text('All cards'),
-                      selected: _selectedBank == null,
-                      onSelected: (_) => setState(() => _selectedBank = null),
+                      selected: _selectedCard == null,
+                      onSelected: (_) => setState(() => _selectedCard = null),
                     ),
-                    for (final name in bankNames) ...[
+                    for (final key in cardKeys) ...[
                       const SizedBox(width: 8),
                       ChoiceChip(
-                        label: Text(name),
-                        selected: _selectedBank == name,
-                        onSelected: (_) => setState(() => _selectedBank = name),
+                        label: Text(cards[key]!),
+                        selected: _selectedCard == key,
+                        onSelected: (_) => setState(() => _selectedCard = key),
                       ),
                     ],
                   ],
@@ -111,7 +107,9 @@ class _CardTransactionsScreenState extends State<CardTransactionsScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            _selectedBank ?? 'All recognized cards',
+                            _selectedCard == null
+                                ? 'All recognized cards'
+                                : cards[_selectedCard]!,
                             style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(fontWeight: FontWeight.w700),
                           ),
@@ -176,6 +174,9 @@ class _CardTransactionsScreenState extends State<CardTransactionsScreen> {
       );
     },
   );
+
+  String _cardKey(MoneyTransaction transaction) =>
+      '${transaction.bankName ?? ''}|${transaction.instrumentLast4 ?? ''}';
 
   Widget _monthSelector(BuildContext context) => Card(
     child: Row(

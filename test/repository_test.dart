@@ -65,6 +65,29 @@ void main() {
     },
   );
 
+  test('imported financial instrument identity is persisted', () async {
+    await repository.save(
+      MoneyTransaction(
+        title: 'Card purchase',
+        amountPaise: 99900,
+        kind: TransactionKind.expense,
+        categoryId: 13,
+        date: DateTime(2026, 10, 8),
+        source: 'SMS',
+        bankName: 'HDFC Bank',
+        instrumentType: FinancialInstrumentType.creditCard,
+        instrumentLast4: '4321',
+        importRole: ImportedTransactionRole.cardPurchase,
+      ),
+    );
+
+    final saved = (await repository.transactions(DateTime(2026, 10))).single;
+    expect(saved.instrumentType, FinancialInstrumentType.creditCard);
+    expect(saved.instrumentLast4, '4321');
+    expect(saved.importRole, ImportedTransactionRole.cardPurchase);
+    expect(saved.instrumentLabel, 'HDFC Bank •4321');
+  });
+
   test(
     'month boundaries, leap day, and same-date ordering are deterministic',
     () async {
@@ -91,6 +114,23 @@ void main() {
       );
     },
   );
+
+  test('transaction range uses inclusive start and exclusive end', () async {
+    await repository.save(entry('Before', DateTime(2026, 8, 31, 23, 59)));
+    await repository.save(entry('At start', DateTime(2026, 9, 1)));
+    await repository.save(entry('Today', DateTime(2026, 10, 8, 23, 59)));
+    await repository.save(entry('At end', DateTime(2026, 10, 9)));
+
+    final transactions = await repository.transactionsBetween(
+      DateTime(2026, 9, 1),
+      DateTime(2026, 10, 9),
+    );
+
+    expect(transactions.map((transaction) => transaction.title), [
+      'Today',
+      'At start',
+    ]);
+  });
 
   test('v6 date-only transactions migrate to noon', () async {
     await repository.save(entry('Legacy', DateTime(2026, 9, 10, 8)));

@@ -9,6 +9,15 @@ enum TransactionKind {
   final String label;
 }
 
+enum FinancialInstrumentType { bankAccount, creditCard }
+
+enum ImportedTransactionRole {
+  cardPurchase,
+  accountDebit,
+  accountCredit,
+  cardPayment,
+}
+
 // INR input never passes through binary floating point.
 int? parsePaise(String value) {
   final match = RegExp(r'^(\d{1,10})(?:\.(\d{1,2}))?$')
@@ -107,6 +116,9 @@ class MoneyTransaction {
     this.note = '',
     this.source = 'MANUAL',
     this.bankName,
+    this.instrumentType,
+    this.instrumentLast4,
+    this.importRole,
     this.externalId,
     this.recipientKey,
     this.hasReceipt = false,
@@ -120,6 +132,9 @@ class MoneyTransaction {
   final String note;
   final String source;
   final String? bankName;
+  final FinancialInstrumentType? instrumentType;
+  final String? instrumentLast4;
+  final ImportedTransactionRole? importRole;
   final String? externalId;
   final String? recipientKey;
   final bool hasReceipt;
@@ -134,6 +149,9 @@ class MoneyTransaction {
     'note': note.trim(),
     'source': source,
     'bank_name': bankName,
+    if (instrumentType != null) 'instrument_type': instrumentType!.name,
+    if (instrumentLast4 != null) 'instrument_last4': instrumentLast4,
+    if (importRole != null) 'import_role': importRole!.name,
     'external_id': externalId,
     'recipient_key': recipientKey,
   };
@@ -149,10 +167,35 @@ class MoneyTransaction {
         note: row['note'] as String,
         source: (row['source'] as String?) ?? 'MANUAL',
         bankName: row['bank_name'] as String?,
+        instrumentType: row['instrument_type'] == null
+            ? null
+            : FinancialInstrumentType.values.byName(
+                row['instrument_type'] as String,
+              ),
+        instrumentLast4: row['instrument_last4'] as String?,
+        importRole: row['import_role'] == null
+            ? null
+            : ImportedTransactionRole.values.byName(
+                row['import_role'] as String,
+              ),
         externalId: row['external_id'] as String?,
         recipientKey: row['recipient_key'] as String?,
         hasReceipt: row['has_receipt'] == 1,
       );
+
+  bool get isCreditCard =>
+      instrumentType == FinancialInstrumentType.creditCard ||
+      (instrumentType == null &&
+          (bankName?.toLowerCase().contains('credit card') ?? false));
+
+  String get instrumentLabel {
+    final institution = bankName?.trim();
+    final base = institution == null || institution.isEmpty
+        ? (isCreditCard ? 'Credit card' : 'Bank account')
+        : institution;
+    final suffix = instrumentLast4?.trim();
+    return suffix == null || suffix.isEmpty ? base : '$base •$suffix';
+  }
 }
 
 class MonthSummary {

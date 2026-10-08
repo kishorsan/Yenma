@@ -96,7 +96,7 @@ void main() {
     );
     await repository.initialize();
 
-    expect(await repository.debtDatabase.getVersion(), 15);
+    expect(await repository.debtDatabase.getVersion(), 16);
     final subscriptions = await repository.subscriptions();
     expect(subscriptions.single.billingMonth, 1);
   });

@@ -120,7 +120,7 @@ class _TransactionDetailState extends State<TransactionDetail> {
                         title: const Text('Source'),
                         subtitle: Text(
                           transaction.source == 'SMS'
-                              ? '${transaction.bankName ?? 'Bank'} · Imported from messages · INR'
+                              ? '${transaction.instrumentLabel} · Imported from messages · INR'
                               : 'Cash · Manual entry · INR',
                         ),
                       ),
