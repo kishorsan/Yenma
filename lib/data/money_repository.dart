@@ -16,7 +16,11 @@ import 'reference_data.dart';
 import 'splitting_data.dart';
 
 abstract interface class MoneyRepository
-    implements DebtRepository, SplitRepository, SubscriptionRepository {
+    implements
+        DebtRepository,
+        SplitRepository,
+        SubscriptionRepository,
+        EmiRepository {
   Future<void> initialize();
   Future<List<MoneyCategory>> categories();
   Future<List<MoneyTransaction>> transactions(DateTime month);
@@ -73,7 +77,7 @@ class SqliteMoneyRepository
     _database = await _factory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 14,
+        version: 15,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: (db, version) async {
           await _createMoneySchema(db);
@@ -162,6 +166,42 @@ class SqliteMoneyRepository
               'INTEGER NOT NULL DEFAULT 1 CHECK(billing_month BETWEEN 1 AND 12)',
             );
           }
+          if (oldVersion < 15) {
+            // Some legacy databases only contain the structured tables that
+            // were used at the time. Ensure the commitment tables exist before
+            // extending them with the EMI-specific columns.
+            await createCommitmentsSchema(db);
+            await _addColumnIfMissing(
+              db,
+              'loans',
+              'emi_name',
+              "TEXT NOT NULL DEFAULT 'EMI'",
+            );
+            await _addColumnIfMissing(
+              db,
+              'loans',
+              'processing_fee_paise',
+              'INTEGER NOT NULL DEFAULT 0 CHECK(processing_fee_paise >= 0)',
+            );
+            await _addColumnIfMissing(
+              db,
+              'loans',
+              'billing_day',
+              'INTEGER NOT NULL DEFAULT 1 CHECK(billing_day BETWEEN 1 AND 28)',
+            );
+            await _addColumnIfMissing(
+              db,
+              'loans',
+              'emi_ownership',
+              "TEXT NOT NULL DEFAULT 'MINE' CHECK(emi_ownership IN ('MINE','THROUGH_ME'))",
+            );
+            await _addColumnIfMissing(
+              db,
+              'loan_tracking',
+              'gst_paise',
+              'INTEGER NOT NULL DEFAULT 0 CHECK(gst_paise >= 0)',
+            );
+          }
         },
       ),
     );
@@ -181,6 +221,40 @@ class SqliteMoneyRepository
   @override
   Future<List<SubscriptionRecord>> subscriptions({bool? active}) =>
       commitments.subscriptions(active: active);
+
+  @override
+  Future<int> saveEmi(EmiRecord value) => commitments.saveEmi(value);
+
+  @override
+  Future<List<EmiRecord>> emis() => commitments.emis();
+
+  @override
+  Future<List<EmiInstallment>> emiInstallments(int emiId) =>
+      commitments.emiInstallments(emiId);
+
+  @override
+  Future<void> saveEmiInstallment({
+    int? id,
+    required int emiId,
+    required int principalPaise,
+    required int interestPaise,
+    required DateTime date,
+    required bool isPaid,
+  }) => commitments.saveEmiInstallment(
+    id: id,
+    emiId: emiId,
+    principalPaise: principalPaise,
+    interestPaise: interestPaise,
+    date: date,
+    isPaid: isPaid,
+  );
+
+  @override
+  Future<int> loadGstBasisPoints() => commitments.loadGstBasisPoints();
+
+  @override
+  Future<void> saveGstBasisPoints(int basisPoints) =>
+      commitments.saveGstBasisPoints(basisPoints);
 
   static Future<void> _createMoneySchema(DatabaseExecutor db) async {
     await _createCategoriesTable(db);

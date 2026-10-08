@@ -27,6 +27,7 @@ class MoneyController extends ChangeNotifier {
   bool smsConsentGranted = false;
   bool initialSmsSyncComplete = false;
   List<DebtRecord> debts = [];
+  List<Repayment> debtRepayments = [];
   List<String> people = [];
   bool debtsLoading = false;
   String? debtError;
@@ -192,6 +193,34 @@ class MoneyController extends ChangeNotifier {
   Future<int> saveSubscription(SubscriptionRecord subscription) =>
       repository.saveSubscription(subscription);
 
+  Future<List<EmiRecord>> emis() => repository.emis();
+
+  Future<int> saveEmi(EmiRecord emi) => repository.saveEmi(emi);
+
+  Future<List<EmiInstallment>> emiInstallments(int emiId) =>
+      repository.emiInstallments(emiId);
+
+  Future<void> saveEmiInstallment({
+    int? id,
+    required int emiId,
+    required int principalPaise,
+    required int interestPaise,
+    required DateTime date,
+    required bool isPaid,
+  }) => repository.saveEmiInstallment(
+    id: id,
+    emiId: emiId,
+    principalPaise: principalPaise,
+    interestPaise: interestPaise,
+    date: date,
+    isPaid: isPaid,
+  );
+
+  Future<int> loadGstBasisPoints() => repository.loadGstBasisPoints();
+
+  Future<void> saveGstBasisPoints(int value) =>
+      repository.saveGstBasisPoints(value);
+
   Future<List<SplitGroup>> splitGroups() => repository.splitGroups();
 
   Future<int> createSplitGroup({
@@ -267,9 +296,11 @@ class MoneyController extends ChangeNotifier {
     try {
       final result = await repository.debts();
       final names = await repository.people();
+      final repayments = await repository.allRepayments();
       if (generation == _debtGeneration) {
         debts = result;
         people = names;
+        debtRepayments = repayments;
       }
     } catch (_) {
       if (generation == _debtGeneration) {

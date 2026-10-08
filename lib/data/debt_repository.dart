@@ -325,6 +325,12 @@ mixin SqliteDebtOperations implements DebtRepository {
   }
 
   @override
+  Future<List<Repayment>> allRepayments() async => (await debtDatabase.query(
+    'repayments',
+    orderBy: 'date DESC, id DESC',
+  )).map(Repayment.fromRow).toList();
+
+  @override
   Future<List<Repayment>> repayments(int debtId) async =>
       (await debtDatabase.query(
         'repayments',

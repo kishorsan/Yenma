@@ -17,6 +17,9 @@ class MemoryRepository implements MoneyRepository {
   final List<MoneyPlan> moneyPlans = [];
   final List<PlanType> savedPlanTypes = [];
   final List<SubscriptionRecord> savedSubscriptions = [];
+  final List<EmiRecord> savedEmis = [];
+  final List<EmiInstallment> savedEmiInstallments = [];
+  int gstBasisPoints = 1800;
   String theme = 'system';
   bool smsConsent = false;
   bool initialSmsSyncComplete = false;
@@ -140,6 +143,113 @@ class MemoryRepository implements MoneyRepository {
       return month == 0 ? a.billingDay.compareTo(b.billingDay) : month;
     });
     return result;
+  }
+
+  @override
+  Future<int> saveEmi(EmiRecord value) async {
+    if (failSave) throw StateError('Disk full');
+    final id = value.id ?? ++_id;
+    final current = savedEmis.where((item) => item.id == id).firstOrNull;
+    final saved = EmiRecord(
+      id: id,
+      name: value.name.trim(),
+      principalPaise: value.principalPaise,
+      paidPrincipalPaise:
+          current?.paidPrincipalPaise ?? value.paidPrincipalPaise,
+      processingFeePaise: value.processingFeePaise,
+      billingDay: value.billingDay,
+      startDate: value.startDate,
+      endDate: value.endDate,
+      note: value.note.trim(),
+      ownership: value.ownership,
+    );
+    savedEmis.removeWhere((item) => item.id == id);
+    savedEmis.add(saved);
+    return id;
+  }
+
+  @override
+  Future<List<EmiRecord>> emis() async {
+    final result = List<EmiRecord>.of(savedEmis);
+    result.sort((a, b) {
+      final state = (a.isComplete ? 1 : 0).compareTo(b.isComplete ? 1 : 0);
+      return state == 0 ? b.startDate.compareTo(a.startDate) : state;
+    });
+    return result;
+  }
+
+  @override
+  Future<List<EmiInstallment>> emiInstallments(int emiId) async =>
+      savedEmiInstallments.where((item) => item.emiId == emiId).toList()
+        ..sort((a, b) => b.date.compareTo(a.date));
+
+  @override
+  Future<void> saveEmiInstallment({
+    int? id,
+    required int emiId,
+    required int principalPaise,
+    required int interestPaise,
+    required DateTime date,
+    required bool isPaid,
+  }) async {
+    if (failSave) throw StateError('Disk full');
+    if (principalPaise < 0 ||
+        interestPaise < 0 ||
+        principalPaise + interestPaise <= 0 ||
+        date.day > 28) {
+      throw ArgumentError('Invalid EMI instalment');
+    }
+    final installmentId = id ?? ++_id;
+    final emi = savedEmis.where((item) => item.id == emiId).firstOrNull;
+    if (emi == null ||
+        date.isBefore(emi.startDate) ||
+        (emi.endDate != null && date.isAfter(emi.endDate!))) {
+      throw ArgumentError('Invalid EMI date');
+    }
+    final otherPaid = savedEmiInstallments
+        .where(
+          (item) =>
+              item.emiId == emiId && item.id != installmentId && item.isPaid,
+        )
+        .fold<int>(0, (total, item) => total + item.principalPaise);
+    final paid = otherPaid + (isPaid ? principalPaise : 0);
+    if (paid > emi.principalPaise) throw ArgumentError('Overpayment');
+    savedEmiInstallments.removeWhere((item) => item.id == installmentId);
+    savedEmiInstallments.add(
+      EmiInstallment(
+        id: installmentId,
+        emiId: emiId,
+        principalPaise: principalPaise,
+        interestPaise: interestPaise,
+        gstPaise: (interestPaise * gstBasisPoints + 5000) ~/ 10000,
+        date: date,
+        isPaid: isPaid,
+      ),
+    );
+    final index = savedEmis.indexWhere((item) => item.id == emiId);
+    if (index >= 0) {
+      savedEmis[index] = EmiRecord(
+        id: emi.id,
+        name: emi.name,
+        principalPaise: emi.principalPaise,
+        paidPrincipalPaise: paid,
+        processingFeePaise: emi.processingFeePaise,
+        billingDay: emi.billingDay,
+        startDate: emi.startDate,
+        endDate: emi.endDate,
+        note: emi.note,
+        ownership: emi.ownership,
+      );
+    }
+  }
+
+  @override
+  Future<int> loadGstBasisPoints() async => gstBasisPoints;
+
+  @override
+  Future<void> saveGstBasisPoints(int basisPoints) async {
+    if (basisPoints < 0 || basisPoints > 10000) throw ArgumentError('GST');
+    gstBasisPoints = basisPoints;
   }
 
   @override
@@ -333,6 +443,12 @@ class MemoryRepository implements MoneyRepository {
 
   @override
   Future<Uint8List?> debtReceipt(int id) async => _receipts[id];
+  @override
+  Future<List<Repayment>> allRepayments() async =>
+      List.of(_repayments)..sort((a, b) {
+        final date = b.date.compareTo(a.date);
+        return date == 0 ? b.id.compareTo(a.id) : date;
+      });
   @override
   Future<List<Repayment>> repayments(int debtId) async =>
       _repayments.where((r) => r.debtId == debtId).toList();

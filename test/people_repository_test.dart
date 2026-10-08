@@ -67,7 +67,7 @@ void main() {
       await repository.debtDatabase.setVersion(2);
       await repository.close();
       await repository.initialize();
-      expect(await repository.debtDatabase.getVersion(), 14);
+      expect(await repository.debtDatabase.getVersion(), 15);
       expect(await repository.people(), ['Arun', 'Meera']);
       expect(await repository.debts(), hasLength(3));
       expect((await repository.debts()).first.isSettled, isTrue);

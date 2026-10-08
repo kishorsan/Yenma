@@ -135,7 +135,7 @@ class _DebtDetailState extends State<DebtDetail> {
                                 ),
                                 const SizedBox(height: 16),
                                 Text(
-                                  'Original share: ${formatMoney(debt.amountPaise)}',
+                                  'Original debt: ${formatMoney(debt.amountPaise)}',
                                 ),
                                 Text(
                                   'Repaid: ${formatMoney(debt.repaidPaise)}',
@@ -170,7 +170,7 @@ class _DebtDetailState extends State<DebtDetail> {
                               leading: const Icon(Icons.receipt_long_outlined),
                               title: const Text('Linked payment'),
                               subtitle: const Text(
-                                'View the original expense and all its shares',
+                                'View the original payment linked to this debt',
                               ),
                               trailing: const Icon(Icons.chevron_right),
                               onTap: _busy

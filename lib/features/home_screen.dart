@@ -15,6 +15,7 @@ import 'feature_landing_screen.dart';
 import 'split/split_screen.dart';
 import 'monthly_plan_screen.dart';
 import 'subscriptions/subscriptions_screen.dart';
+import 'emi/emi_screen.dart';
 
 class _YenmaDestination {
   const _YenmaDestination(this.icon, this.selectedIcon, this.label);
@@ -94,6 +95,69 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       builder: (_) => SubscriptionsScreen(controller: controller),
     ),
   );
+
+  void _openEmis() => Navigator.of(context).push(
+    MaterialPageRoute<void>(builder: (_) => EmiScreen(controller: controller)),
+  );
+
+  Future<void> _editEmiGst() async {
+    final current = await controller.loadGstBasisPoints();
+    if (!mounted) return;
+    final text = TextEditingController(
+      text: current % 100 == 0
+          ? '${current ~/ 100}'
+          : '${current ~/ 100}.${(current % 100).toString().padLeft(2, '0')}',
+    );
+    final form = GlobalKey<FormState>();
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('EMI GST rate'),
+        content: Form(
+          key: form,
+          child: TextFormField(
+            controller: text,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'GST percentage',
+              suffixText: '%',
+            ),
+            validator: (value) {
+              final percent = double.tryParse((value ?? '').trim());
+              return percent == null ||
+                      !percent.isFinite ||
+                      percent < 0 ||
+                      percent > 100
+                  ? 'Enter a percentage from 0 to 100'
+                  : null;
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              if (!form.currentState!.validate()) return;
+              final basisPoints = (double.parse(text.text.trim()) * 100)
+                  .round();
+              await controller.saveGstBasisPoints(basisPoints);
+              if (dialogContext.mounted) Navigator.pop(dialogContext, true);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    text.dispose();
+    if (saved == true && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('EMI GST rate saved.')));
+    }
+  }
 
   void _openDesignFeature({
     required String title,
@@ -582,20 +646,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         icon: Icons.subscriptions_outlined,
         open: _openSubscriptions,
       ),
-      (
-        label: 'EMI',
-        icon: Icons.event_repeat_outlined,
-        open: () => _openDesignFeature(
-          title: 'EMI',
-          icon: Icons.event_repeat_outlined,
-          description: 'Follow upcoming instalments and their paid state.',
-          sections: const [
-            'Upcoming instalments',
-            'Principal and interest',
-            'Payment history',
-          ],
-        ),
-      ),
+      (label: 'EMI', icon: Icons.event_repeat_outlined, open: _openEmis),
       (
         label: 'Loan',
         icon: Icons.account_balance_outlined,
@@ -964,18 +1015,25 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
       ),
       const SizedBox(height: 16),
-      const Card(
+      Card(
         child: Column(
           children: [
-            ListTile(
+            const ListTile(
               leading: Icon(Icons.currency_rupee),
               title: Text('Indian rupee'),
               subtitle: Text('All transactions are recorded in INR.'),
             ),
-            ListTile(
+            const ListTile(
               leading: Icon(Icons.phone_android_outlined),
               title: Text('Stored on this device'),
               subtitle: Text('Your entries stay local. No account needed.'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.percent),
+              title: const Text('EMI GST rate'),
+              subtitle: const Text('Used to calculate GST on EMI interest.'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _editEmiGst,
             ),
           ],
         ),
