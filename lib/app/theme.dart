@@ -2,41 +2,152 @@ import 'package:flutter/material.dart';
 
 import '../domain/money.dart';
 
-const mint = Color(0xFF58DCB1);
-const coral = Color(0xFFFF887C);
-const blue = Color(0xFF8AB4FF);
-Color kindColor(TransactionKind kind, Brightness brightness) => switch (kind) {
-  TransactionKind.expense =>
-    brightness == Brightness.dark ? coral : const Color(0xFFB54035),
-  TransactionKind.income =>
-    brightness == Brightness.dark ? mint : const Color(0xFF147452),
-  TransactionKind.transfer =>
-    brightness == Brightness.dark ? blue : const Color(0xFF305AA1),
+@immutable
+class YenmaColors extends ThemeExtension<YenmaColors> {
+  const YenmaColors({
+    required this.income,
+    required this.expense,
+    required this.transfer,
+    required this.success,
+    required this.warning,
+    required this.heroSurface,
+    required this.onHeroSurface,
+    required this.onHeroSurfaceMuted,
+  });
+
+  final Color income;
+  final Color expense;
+  final Color transfer;
+  final Color success;
+  final Color warning;
+  final Color heroSurface;
+  final Color onHeroSurface;
+  final Color onHeroSurfaceMuted;
+
+  static const light = YenmaColors(
+    income: Color(0xFF256B4F),
+    expense: Color(0xFF9A3E38),
+    transfer: Color(0xFF405F8E),
+    success: Color(0xFF256B4F),
+    warning: Color(0xFF835500),
+    heroSurface: Color(0xFF303236),
+    onHeroSurface: Color(0xFFF7F7F7),
+    onHeroSurfaceMuted: Color(0xFFCECFD2),
+  );
+
+  static const dark = YenmaColors(
+    income: Color(0xFF78D8AD),
+    expense: Color(0xFFFFAAA2),
+    transfer: Color(0xFFAFC6F0),
+    success: Color(0xFF78D8AD),
+    warning: Color(0xFFFFC56A),
+    heroSurface: Color(0xFFE1E2E5),
+    onHeroSurface: Color(0xFF202124),
+    onHeroSurfaceMuted: Color(0xFF55575C),
+  );
+
+  @override
+  YenmaColors copyWith({
+    Color? income,
+    Color? expense,
+    Color? transfer,
+    Color? success,
+    Color? warning,
+    Color? heroSurface,
+    Color? onHeroSurface,
+    Color? onHeroSurfaceMuted,
+  }) => YenmaColors(
+    income: income ?? this.income,
+    expense: expense ?? this.expense,
+    transfer: transfer ?? this.transfer,
+    success: success ?? this.success,
+    warning: warning ?? this.warning,
+    heroSurface: heroSurface ?? this.heroSurface,
+    onHeroSurface: onHeroSurface ?? this.onHeroSurface,
+    onHeroSurfaceMuted: onHeroSurfaceMuted ?? this.onHeroSurfaceMuted,
+  );
+
+  @override
+  YenmaColors lerp(covariant YenmaColors? other, double t) {
+    if (other == null) return this;
+    return YenmaColors(
+      income: Color.lerp(income, other.income, t)!,
+      expense: Color.lerp(expense, other.expense, t)!,
+      transfer: Color.lerp(transfer, other.transfer, t)!,
+      success: Color.lerp(success, other.success, t)!,
+      warning: Color.lerp(warning, other.warning, t)!,
+      heroSurface: Color.lerp(heroSurface, other.heroSurface, t)!,
+      onHeroSurface: Color.lerp(onHeroSurface, other.onHeroSurface, t)!,
+      onHeroSurfaceMuted: Color.lerp(
+        onHeroSurfaceMuted,
+        other.onHeroSurfaceMuted,
+        t,
+      )!,
+    );
+  }
+}
+
+extension YenmaThemeContext on BuildContext {
+  YenmaColors get yenmaColors =>
+      Theme.of(this).extension<YenmaColors>() ?? YenmaColors.light;
+}
+
+Color kindColor(TransactionKind kind, BuildContext context) => switch (kind) {
+  TransactionKind.expense => context.yenmaColors.expense,
+  TransactionKind.income => context.yenmaColors.income,
+  TransactionKind.transfer => context.yenmaColors.transfer,
 };
 
 ThemeData yenmaTheme(Brightness brightness) {
   final dark = brightness == Brightness.dark;
   final scheme =
       ColorScheme.fromSeed(
-        seedColor: const Color(0xFF258464),
+        seedColor: const Color(0xFF66686D),
         brightness: brightness,
       ).copyWith(
-        surface: dark ? const Color(0xFF111C20) : const Color(0xFFF7F9F7),
-        primary: dark ? mint : const Color(0xFF146B50),
+        surface: dark ? const Color(0xFF17181A) : const Color(0xFFF2F2F3),
+        surfaceContainer: dark
+            ? const Color(0xFF222326)
+            : const Color(0xFFE7E7E9),
+        surfaceContainerHigh: dark
+            ? const Color(0xFF2C2D31)
+            : const Color(0xFFDCDDE0),
+        primary: dark ? const Color(0xFFE1E2E5) : const Color(0xFF303236),
+        onPrimary: dark ? const Color(0xFF202124) : const Color(0xFFF7F7F7),
       );
-  return ThemeData(
-    useMaterial3: true,
-    colorScheme: scheme,
+  final base = ThemeData(useMaterial3: true, colorScheme: scheme);
+  return base.copyWith(
+    extensions: <ThemeExtension<dynamic>>[
+      dark ? YenmaColors.dark : YenmaColors.light,
+    ],
     scaffoldBackgroundColor: scheme.surface,
-    appBarTheme: const AppBarTheme(
+    appBarTheme: AppBarTheme(
       centerTitle: false,
       scrolledUnderElevation: 0,
+      toolbarHeight: 48,
+      titleTextStyle: base.textTheme.titleLarge!.copyWith(
+        fontSize: 18,
+        fontWeight: FontWeight.w600,
+        color: scheme.onSurface,
+      ),
     ),
     cardTheme: CardThemeData(
       elevation: 0,
       margin: EdgeInsets.zero,
-      color: dark ? const Color(0xFF1C292D) : Colors.white,
+      color: scheme.surfaceContainer,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      elevation: 0,
+      backgroundColor: scheme.surfaceContainer,
+      indicatorColor: scheme.primary,
+      iconTheme: WidgetStateProperty.resolveWith(
+        (states) => IconThemeData(
+          color: states.contains(WidgetState.selected)
+              ? scheme.onPrimary
+              : scheme.onSurfaceVariant,
+        ),
+      ),
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
@@ -66,5 +177,9 @@ IconData categoryIcon(String key) => switch (key) {
   'account_balance' => Icons.account_balance_outlined,
   'trending_up' => Icons.trending_up,
   'swap_horiz' => Icons.swap_horiz_rounded,
+  'home' => Icons.home_outlined,
+  'call_received' => Icons.call_received_rounded,
+  'account_balance_wallet' => Icons.account_balance_wallet_outlined,
+  'savings' => Icons.savings_outlined,
   _ => Icons.more_horiz,
 };

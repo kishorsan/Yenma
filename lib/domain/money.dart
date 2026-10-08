@@ -9,6 +9,15 @@ enum TransactionKind {
   final String label;
 }
 
+enum FinancialInstrumentType { bankAccount, creditCard }
+
+enum ImportedTransactionRole {
+  cardPurchase,
+  accountDebit,
+  accountCredit,
+  cardPayment,
+}
+
 // INR input never passes through binary floating point.
 int? parsePaise(String value) {
   final match = RegExp(r'^(\d{1,10})(?:\.(\d{1,2}))?$')
@@ -27,8 +36,33 @@ String formatMoney(int paise) {
 
 String dateKey(DateTime date) =>
     '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+String dateTimeKey(DateTime date) =>
+    '${dateKey(date)}T${date.hour.toString().padLeft(2, '0')}:'
+    '${date.minute.toString().padLeft(2, '0')}:'
+    '${date.second.toString().padLeft(2, '0')}.'
+    '${date.millisecond.toString().padLeft(3, '0')}';
+
+DateTime parseTransactionDate(String value) {
+  final parsed = DateTime.parse(value);
+  return value.contains('T') || value.contains(' ')
+      ? parsed
+      : DateTime(parsed.year, parsed.month, parsed.day, 12);
+}
+
 DateTime calendarDate(DateTime date) =>
     DateTime(date.year, date.month, date.day);
+
+String transactionNameKey(String value) =>
+    value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+
+Iterable<MoneyTransaction> transactionsMatchingName(
+  Iterable<MoneyTransaction> candidates,
+  MoneyTransaction target,
+) => candidates.where(
+  (candidate) =>
+      candidate.kind == target.kind &&
+      transactionNameKey(candidate.title) == transactionNameKey(target.title),
+);
 
 class MoneyCategory {
   const MoneyCategory(this.id, this.name, this.icon, this.color, this.kinds);
@@ -63,6 +97,12 @@ const defaultCategories = <MoneyCategory>[
     TransactionKind.expense,
     TransactionKind.income,
   }),
+  MoneyCategory(14, 'Rent', 'home', 0xFF7C6CF2, _expense),
+  MoneyCategory(15, 'Received', 'call_received', 0xFF20BF6B, {
+    TransactionKind.income,
+  }),
+  MoneyCategory(16, 'Wallet', 'account_balance_wallet', 0xFFF7B731, _expense),
+  MoneyCategory(17, 'Savings', 'savings', 0xFF2D98DA, _expense),
 ];
 
 class MoneyTransaction {
@@ -74,6 +114,14 @@ class MoneyTransaction {
     required this.categoryId,
     required this.date,
     this.note = '',
+    this.source = 'MANUAL',
+    this.bankName,
+    this.instrumentType,
+    this.instrumentLast4,
+    this.importRole,
+    this.externalId,
+    this.recipientKey,
+    this.hasReceipt = false,
   });
   final int? id;
   final String title;
@@ -82,6 +130,14 @@ class MoneyTransaction {
   final int categoryId;
   final DateTime date;
   final String note;
+  final String source;
+  final String? bankName;
+  final FinancialInstrumentType? instrumentType;
+  final String? instrumentLast4;
+  final ImportedTransactionRole? importRole;
+  final String? externalId;
+  final String? recipientKey;
+  final bool hasReceipt;
 
   Map<String, Object?> toRow() => {
     if (id != null) 'id': id,
@@ -89,8 +145,15 @@ class MoneyTransaction {
     'amount_paise': amountPaise,
     'kind': kind.name,
     'category_id': categoryId,
-    'date': dateKey(date),
+    'date': dateTimeKey(date),
     'note': note.trim(),
+    'source': source,
+    'bank_name': bankName,
+    if (instrumentType != null) 'instrument_type': instrumentType!.name,
+    if (instrumentLast4 != null) 'instrument_last4': instrumentLast4,
+    if (importRole != null) 'import_role': importRole!.name,
+    'external_id': externalId,
+    'recipient_key': recipientKey,
   };
 
   factory MoneyTransaction.fromRow(Map<String, Object?> row) =>
@@ -100,9 +163,39 @@ class MoneyTransaction {
         amountPaise: row['amount_paise'] as int,
         kind: TransactionKind.values.byName(row['kind'] as String),
         categoryId: row['category_id'] as int,
-        date: DateTime.parse(row['date'] as String),
+        date: parseTransactionDate(row['date'] as String),
         note: row['note'] as String,
+        source: (row['source'] as String?) ?? 'MANUAL',
+        bankName: row['bank_name'] as String?,
+        instrumentType: row['instrument_type'] == null
+            ? null
+            : FinancialInstrumentType.values.byName(
+                row['instrument_type'] as String,
+              ),
+        instrumentLast4: row['instrument_last4'] as String?,
+        importRole: row['import_role'] == null
+            ? null
+            : ImportedTransactionRole.values.byName(
+                row['import_role'] as String,
+              ),
+        externalId: row['external_id'] as String?,
+        recipientKey: row['recipient_key'] as String?,
+        hasReceipt: row['has_receipt'] == 1,
       );
+
+  bool get isCreditCard =>
+      instrumentType == FinancialInstrumentType.creditCard ||
+      (instrumentType == null &&
+          (bankName?.toLowerCase().contains('credit card') ?? false));
+
+  String get instrumentLabel {
+    final institution = bankName?.trim();
+    final base = institution == null || institution.isEmpty
+        ? (isCreditCard ? 'Credit card' : 'Bank account')
+        : institution;
+    final suffix = instrumentLast4?.trim();
+    return suffix == null || suffix.isEmpty ? base : '$base •$suffix';
+  }
 }
 
 class MonthSummary {

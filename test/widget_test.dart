@@ -11,9 +11,11 @@ void main() {
       await tester.binding.setSurfaceSize(const Size(430, 1000));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final repository = MemoryRepository();
-      await tester.pumpWidget(YenmaApp(repository: repository));
+      await tester.pumpWidget(
+        YenmaApp(showWelcome: false, repository: repository),
+      );
       await tester.pumpAndSettle();
-      expect(find.text('A fresh page for your money'), findsOneWidget);
+      expect(find.text('Your money tools'), findsOneWidget);
       await tester.tap(find.text('Add transaction'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextFormField).at(0), '125.50');
@@ -22,7 +24,12 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Food').last);
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Save transaction'));
+      await tester.scrollUntilVisible(
+        find.text('Save transaction'),
+        250,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Save transaction'));
       await tester.pumpAndSettle();
       expect(repository.entries.single.amountPaise, 12550);
@@ -32,7 +39,12 @@ void main() {
       await tester.tap(find.text('Edit transaction'));
       await tester.pumpAndSettle();
       await tester.enterText(find.byType(TextFormField).at(1), 'Dinner');
-      await tester.ensureVisible(find.text('Save transaction'));
+      await tester.scrollUntilVisible(
+        find.text('Save transaction'),
+        250,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Save transaction'));
       await tester.pumpAndSettle();
       expect(repository.entries.single.title, 'Dinner');
@@ -58,7 +70,9 @@ void main() {
     await tester.binding.setSurfaceSize(const Size(430, 1100));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     final repository = MemoryRepository()..failSave = true;
-    await tester.pumpWidget(YenmaApp(repository: repository));
+    await tester.pumpWidget(
+      YenmaApp(showWelcome: false, repository: repository),
+    );
     await tester.pumpAndSettle();
     await tester.tap(find.text('Add transaction'));
     await tester.pumpAndSettle();

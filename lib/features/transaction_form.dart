@@ -8,6 +8,7 @@ import '../app/money_controller.dart';
 import '../domain/money.dart';
 import '../domain/debt.dart';
 import 'debts/receipt_editor.dart';
+import 'debts/person_name_field.dart';
 
 class TransactionForm extends StatefulWidget {
   const TransactionForm({
@@ -32,16 +33,46 @@ class _TransactionFormState extends State<TransactionForm> {
   late final _note = TextEditingController(text: widget.transaction?.note);
   late TransactionKind _kind =
       widget.transaction?.kind ?? TransactionKind.expense;
-  late DateTime _date =
-      widget.transaction?.date ?? calendarDate(DateTime.now());
+  late DateTime _date = widget.transaction?.date ?? _todayAtNoon();
   late int? _categoryId = widget.transaction?.categoryId;
   bool _saving = false;
   String? _error;
   final _friend = TextEditingController();
   final _share = TextEditingController();
+  final _additionalFriends = <TextEditingController>[];
+  final _additionalShares = <TextEditingController>[];
   bool _split = false;
   bool _picking = false;
   Uint8List? _receipt;
+  static DateTime _todayAtNoon() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day, 12);
+  }
+
+  int get _allocated => widget.transaction?.id == null
+      ? 0
+      : widget.controller
+            .shares(widget.transaction!.id!)
+            .fold(0, (sum, debt) => sum + debt.amountPaise);
+  int get _newAllocated =>
+      (parsePaise(_share.text) ?? 0) +
+      _additionalShares.fold(
+        0,
+        (sum, field) => sum + (parsePaise(field.text) ?? 0),
+      );
+  int get _available =>
+      (parsePaise(_amount.text) ?? 0) - _allocated - _newAllocated;
+  @override
+  void initState() {
+    super.initState();
+    final id = widget.transaction?.id;
+    if (id != null && widget.transaction!.hasReceipt) {
+      widget.controller.repository.transactionReceipt(id).then((bytes) {
+        if (mounted) setState(() => _receipt = bytes);
+      });
+    }
+  }
+
   @override
   void dispose() {
     _title.dispose();
@@ -49,6 +80,9 @@ class _TransactionFormState extends State<TransactionForm> {
     _note.dispose();
     _friend.dispose();
     _share.dispose();
+    for (final field in [..._additionalFriends, ..._additionalShares]) {
+      field.dispose();
+    }
     super.dispose();
   }
 
@@ -67,12 +101,16 @@ class _TransactionFormState extends State<TransactionForm> {
         categoryId: _categoryId!,
         date: _date,
         note: _note.text,
+        source: widget.transaction?.source ?? 'MANUAL',
+        bankName: widget.transaction?.bankName,
+        instrumentType: widget.transaction?.instrumentType,
+        instrumentLast4: widget.transaction?.instrumentLast4,
+        importRole: widget.transaction?.importRole,
+        externalId: widget.transaction?.externalId,
+        recipientKey: widget.transaction?.recipientKey,
       );
-      if (_split &&
-          _kind == TransactionKind.expense &&
-          widget.transaction == null) {
-        await widget.controller.saveSharedExpense(
-          transaction,
+      if (_split && _kind == TransactionKind.expense) {
+        final drafts = <DebtDraft>[
           DebtDraft(
             person: _friend.text,
             title: _title.text,
@@ -80,11 +118,24 @@ class _TransactionFormState extends State<TransactionForm> {
             direction: DebtDirection.owedToMe,
             date: _date,
             note: _note.text,
-            receipt: _receipt,
           ),
+          for (var i = 0; i < _additionalFriends.length; i++)
+            DebtDraft(
+              person: _additionalFriends[i].text,
+              title: _title.text,
+              amountPaise: parsePaise(_additionalShares[i].text)!,
+              direction: DebtDirection.owedToMe,
+              date: _date,
+              note: _note.text,
+            ),
+        ];
+        await widget.controller.saveSharedExpenses(
+          transaction,
+          drafts,
+          receipt: _receipt,
         );
       } else {
-        await widget.controller.save(transaction);
+        await widget.controller.save(transaction, receipt: _receipt);
       }
       if (mounted) Navigator.pop(context, true);
     } catch (error) {
@@ -120,9 +171,9 @@ class _TransactionFormState extends State<TransactionForm> {
                 children: [
                   Text(
                     'A little detail. A clearer picture.',
-                    style: Theme.of(context).textTheme.titleMedium,
+                    style: Theme.of(context).textTheme.bodySmall,
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 12),
                   SegmentedButton<TransactionKind>(
                     segments: TransactionKind.values
                         .map(
@@ -204,7 +255,29 @@ class _TransactionFormState extends State<TransactionForm> {
                       leading: const Icon(Icons.calendar_today_outlined),
                       title: const Text('Date'),
                       subtitle: Text(DateFormat.yMMMMd().format(_date)),
-                      trailing: const Icon(Icons.chevron_right),
+                      trailing: TextButton.icon(
+                        onPressed: _saving
+                            ? null
+                            : () async {
+                                final selected = await showTimePicker(
+                                  context: context,
+                                  initialTime: TimeOfDay.fromDateTime(_date),
+                                );
+                                if (selected != null && mounted) {
+                                  setState(() {
+                                    _date = DateTime(
+                                      _date.year,
+                                      _date.month,
+                                      _date.day,
+                                      selected.hour,
+                                      selected.minute,
+                                    );
+                                  });
+                                }
+                              },
+                        icon: const Icon(Icons.schedule, size: 18),
+                        label: Text(DateFormat.jm().format(_date)),
+                      ),
                       onTap: _saving
                           ? null
                           : () async {
@@ -215,7 +288,15 @@ class _TransactionFormState extends State<TransactionForm> {
                                 lastDate: DateTime(2100, 12, 31),
                               );
                               if (selected != null && mounted) {
-                                setState(() => _date = selected);
+                                setState(() {
+                                  _date = DateTime(
+                                    selected.year,
+                                    selected.month,
+                                    selected.day,
+                                    _date.hour,
+                                    _date.minute,
+                                  );
+                                });
                               }
                             },
                     ),
@@ -232,8 +313,15 @@ class _TransactionFormState extends State<TransactionForm> {
                       alignLabelWithHint: true,
                     ),
                   ),
-                  if (_kind == TransactionKind.expense &&
-                      widget.transaction == null) ...[
+                  const SizedBox(height: 20),
+                  ReceiptEditor(
+                    source: widget.controller.receipts,
+                    bytes: _receipt,
+                    enabled: !_saving,
+                    onChanged: (value) => setState(() => _receipt = value),
+                    onBusyChanged: (value) => setState(() => _picking = value),
+                  ),
+                  if (_kind == TransactionKind.expense) ...[
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       title: const Text('Split with a friend'),
@@ -246,14 +334,15 @@ class _TransactionFormState extends State<TransactionForm> {
                           : (value) => setState(() => _split = value),
                     ),
                     if (_split) ...[
-                      TextFormField(
+                      if (_allocated > 0)
+                        Text(
+                          'Existing shares: ${formatMoney(_allocated)} · Unallocated: ${formatMoney(_available)}',
+                        ),
+                      PersonNameField(
                         controller: _friend,
                         enabled: !_saving,
-                        maxLength: 80,
-                        textCapitalization: TextCapitalization.words,
-                        decoration: const InputDecoration(
-                          labelText: 'Friend’s name',
-                        ),
+                        people: widget.controller.people,
+                        label: 'Friend’s name',
                         validator: (value) =>
                             value == null || value.trim().isEmpty
                             ? 'Enter your friend’s name'
@@ -274,10 +363,88 @@ class _TransactionFormState extends State<TransactionForm> {
                         validator: (value) {
                           final share = parsePaise(value ?? '');
                           final total = parsePaise(_amount.text);
-                          return share == null || total == null || share > total
-                              ? 'Enter a share no larger than the payment'
+                          return share == null ||
+                                  total == null ||
+                                  share >
+                                      _available +
+                                          (parsePaise(_share.text) ?? 0)
+                              ? 'Enter a share no larger than the unallocated amount'
                               : null;
                         },
+                      ),
+                      ...List.generate(_additionalFriends.length, (index) {
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 12),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                child: PersonNameField(
+                                  controller: _additionalFriends[index],
+                                  enabled: !_saving,
+                                  people: widget.controller.people,
+                                  label: 'Friend ${index + 2}',
+                                  validator: (value) =>
+                                      value == null || value.trim().isEmpty
+                                      ? 'Enter a friend’s name'
+                                      : null,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              SizedBox(
+                                width: 130,
+                                child: TextFormField(
+                                  controller: _additionalShares[index],
+                                  enabled: !_saving,
+                                  keyboardType:
+                                      const TextInputType.numberWithOptions(
+                                        decimal: true,
+                                      ),
+                                  decoration: const InputDecoration(
+                                    labelText: 'Share',
+                                    prefixText: '₹ ',
+                                  ),
+                                  onChanged: (_) => setState(() {}),
+                                  validator: (value) =>
+                                      parsePaise(value ?? '') == null
+                                      ? 'Enter a valid share'
+                                      : null,
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Remove friend',
+                                onPressed: _saving
+                                    ? null
+                                    : () => setState(() {
+                                        _additionalFriends
+                                            .removeAt(index)
+                                            .dispose();
+                                        _additionalShares
+                                            .removeAt(index)
+                                            .dispose();
+                                      }),
+                                icon: const Icon(Icons.close),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton.icon(
+                          onPressed: _saving || _available <= 0
+                              ? null
+                              : () => setState(() {
+                                  _additionalFriends.add(
+                                    TextEditingController(),
+                                  );
+                                  _additionalShares.add(
+                                    TextEditingController(),
+                                  );
+                                }),
+                          icon: const Icon(Icons.person_add_alt),
+                          label: const Text('Add another person'),
+                        ),
                       ),
                       Align(
                         alignment: Alignment.centerLeft,
@@ -286,30 +453,33 @@ class _TransactionFormState extends State<TransactionForm> {
                               ? null
                               : () {
                                   final half =
-                                      (parsePaise(_amount.text) ?? 0) ~/ 2;
+                                      ((_available +
+                                                  (parsePaise(_share.text) ??
+                                                      0)) >
+                                              0
+                                          ? _available +
+                                                (parsePaise(_share.text) ?? 0)
+                                          : 0) ~/
+                                      2;
                                   setState(
                                     () => _share.text =
                                         '${half ~/ 100}.${(half % 100).toString().padLeft(2, '0')}',
                                   );
                                 },
-                          child: const Text('Split equally'),
+                          child: Text(
+                            _allocated == 0
+                                ? 'Split equally'
+                                : 'Half of the unallocated amount',
+                          ),
                         ),
                       ),
                       if (parsePaise(_share.text) != null &&
                           parsePaise(_amount.text) != null &&
-                          parsePaise(_share.text)! <= parsePaise(_amount.text)!)
+                          parsePaise(_share.text)! <=
+                              _available + (parsePaise(_share.text) ?? 0))
                         Text(
-                          'Your share: ${formatMoney(parsePaise(_amount.text)! - parsePaise(_share.text)!)} · Friend owes: ${formatMoney(parsePaise(_share.text)!)}',
+                          'Your share: ${formatMoney(_available)} · Friend owes: ${formatMoney(parsePaise(_share.text)!)}',
                         ),
-                      const SizedBox(height: 16),
-                      ReceiptEditor(
-                        source: widget.controller.receipts,
-                        bytes: _receipt,
-                        enabled: !_saving,
-                        onChanged: (value) => setState(() => _receipt = value),
-                        onBusyChanged: (value) =>
-                            setState(() => _picking = value),
-                      ),
                       const SizedBox(height: 16),
                       const Text(
                         'The full payment stays in your spending. Your friend’s share is tracked separately in Debts. Add more friends from the payment details.',

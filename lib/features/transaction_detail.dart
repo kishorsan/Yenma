@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+
+import 'dart:typed_data';
+
 import 'package:intl/intl.dart';
 
 import '../app/money_controller.dart';
@@ -76,13 +79,12 @@ class _TransactionDetailState extends State<TransactionDetail> {
             child: ListView(
               padding: const EdgeInsets.all(24),
               children: [
-                const SizedBox(height: 16),
-                Icon(categoryIcon(category.icon), size: 48),
-                const SizedBox(height: 20),
+                Icon(categoryIcon(category.icon), size: 28),
+                const SizedBox(height: 12),
                 Text(
                   transaction.title,
                   textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.headlineMedium,
+                  style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 12),
                 FittedBox(
@@ -92,10 +94,7 @@ class _TransactionDetailState extends State<TransactionDetail> {
                     style: TextStyle(
                       fontSize: 36,
                       fontWeight: FontWeight.bold,
-                      color: kindColor(
-                        transaction.kind,
-                        Theme.of(context).brightness,
-                      ),
+                      color: kindColor(transaction.kind, context),
                     ),
                   ),
                 ),
@@ -112,14 +111,18 @@ class _TransactionDetailState extends State<TransactionDetail> {
                         subtitle: Text(category.name),
                       ),
                       ListTile(
-                        title: const Text('Date'),
+                        title: const Text('Date & time'),
                         subtitle: Text(
-                          DateFormat.yMMMMd().format(transaction.date),
+                          DateFormat.yMMMMd().add_jm().format(transaction.date),
                         ),
                       ),
-                      const ListTile(
-                        title: Text('Source'),
-                        subtitle: Text('Manual entry · INR'),
+                      ListTile(
+                        title: const Text('Source'),
+                        subtitle: Text(
+                          transaction.source == 'SMS'
+                              ? '${transaction.instrumentLabel} · Imported from messages · INR'
+                              : 'Cash · Manual entry · INR',
+                        ),
                       ),
                       if (transaction.note.isNotEmpty)
                         ListTile(
@@ -129,6 +132,28 @@ class _TransactionDetailState extends State<TransactionDetail> {
                     ],
                   ),
                 ),
+                if (transaction.hasReceipt)
+                  FutureBuilder<Uint8List?>(
+                    future: widget.controller.repository.transactionReceipt(
+                      transaction.id!,
+                    ),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData) return const SizedBox.shrink();
+                      return Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const ListTile(
+                              leading: Icon(Icons.receipt_long_outlined),
+                              title: Text('Bill attached'),
+                            ),
+                            Image.memory(snapshot.data!, fit: BoxFit.contain),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
                 const SizedBox(height: 24),
                 if (transaction.kind == TransactionKind.expense)
                   ListenableBuilder(

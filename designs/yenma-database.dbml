@@ -1,0 +1,283 @@
+Project Yenma {
+  database_type: 'SQLite'
+  Note: 'Normalized target model for the Flutter application database (yenma.db). It evolves the current version 10 schema with banks, unified associates, money plans, group splitting, subscriptions, and loans. Amounts are stored as integer paise.'
+}
+
+Table categories {
+  id integer [pk, note: 'Stable application-defined identifier.']
+  name text [not null]
+  icon text [not null, note: 'Flutter icon identifier.']
+  color integer [not null, note: 'Serialized Flutter color value.']
+  kinds text [not null, note: 'Comma-separated transaction kinds supported by this category.']
+}
+
+Table transactions {
+  id integer [pk, increment]
+  title text [not null]
+  amount_paise integer [not null, note: 'Positive amount, maximum 999,999,999,999 paise.']
+  transaction_type text [not null, note: 'One of: expense, income, transfer.']
+  category_id integer [not null]
+  date text [not null, note: 'ISO-8601 date/time text.']
+  note text [not null, default: '']
+  source text [not null, default: 'MANUAL']
+  bank_id integer [note: 'Optional bank or credit-card account associated with the transaction.']
+  external_id text [note: 'Unique when non-null; enforced by a partial unique SQLite index.']
+  associate_id integer [note: 'Optional canonical reference to the transaction recipient or sender.']
+  has_receipt integer [not null, default: 0, note: 'Boolean flag: 0 or 1.']
+
+  indexes {
+    (date, id) [name: 'transactions_date_id', note: 'Both columns are indexed descending in SQLite.']
+    external_id [unique, name: 'transactions_external_id', note: 'Partial index: WHERE external_id IS NOT NULL.']
+    bank_id [name: 'transactions_bank']
+    associate_id [name: 'transactions_associate']
+  }
+}
+
+Table banks {
+  id integer [pk, increment]
+  bank_name text [not null]
+  bank_code text [not null, unique]
+  is_tracked integer [not null, default: 1, note: 'Boolean flag: 0 or 1.']
+  is_credit_card integer [not null, default: 0, note: 'Boolean flag: 0 or 1.']
+  created_at text [not null, default: `CURRENT_TIMESTAMP`, note: 'SQLite creation timestamp.']
+}
+
+Table transaction_receipt_chunks {
+  transaction_id integer [not null]
+  chunk_index integer [not null]
+  bytes blob [not null, note: 'Receipt image chunk; the repository writes chunks of at most 262,144 bytes.']
+
+  indexes {
+    (transaction_id, chunk_index) [pk]
+  }
+}
+
+Table debts {
+  id integer [pk, increment]
+  associate_id integer [not null, note: 'Canonical reference to the person or organization associated with this debt.']
+  amount_paise integer [not null, note: 'Positive amount, maximum 999,999,999,999 paise.']
+  direction integer [not null, note: '0 = I owe the associate; 1 = the associate owes me.']
+  debt_type text [not null, default: 'PERSONAL', note: 'Extensible classification for personal debt, EMI, loan, and future debt types.']
+  date text [not null, note: 'ISO-8601 date text.']
+  note text [not null, default: '']
+  has_receipt integer [not null, default: 0, note: 'Boolean flag: 0 or 1.']
+
+  indexes {
+    associate_id [name: 'debts_associate']
+  }
+}
+
+Table debt_receipt_chunks {
+  debt_id integer [not null]
+  chunk_index integer [not null]
+  bytes blob [not null, note: 'Receipt image chunk, restricted to at most 262,144 bytes.']
+
+  indexes {
+    (debt_id, chunk_index) [pk]
+  }
+}
+
+Table repayments {
+  id integer [pk, increment]
+  debt_id integer [not null]
+  amount_paise integer [not null, note: 'Positive repayment amount.']
+  date text [not null, note: 'ISO-8601 date text.']
+  note text [not null, default: '']
+
+  indexes {
+    debt_id [name: 'repayments_debt']
+  }
+}
+
+Table associates {
+  id integer [pk, increment]
+  name text [not null]
+  phone_number text [note: 'Optional E.164 number used for calling, messaging, and runtime WhatsApp sharing.']
+
+  indexes {
+    phone_number [unique]
+  }
+
+  Note: 'Canonical people or organizations shared by transactions and debts. Names and contact details are stored once. Transaction relationships identify recipients or senders without an additional flag. WhatsApp links and app availability are resolved by Flutter at share time.'
+}
+
+Table associate_group {
+  group_id integer [pk, increment]
+  group_name text [not null]
+  created_at text [not null, default: `CURRENT_TIMESTAMP`, note: 'SQLite creation timestamp.']
+
+  Note: 'Named collection of associates used for recurring split allocations.'
+}
+
+Table associate_group_mapping {
+  id integer [pk, increment]
+  group_id integer [not null]
+  associate_id integer [not null]
+
+  indexes {
+    (group_id, associate_id) [unique]
+    associate_id [name: 'associate_group_mapping_associate']
+  }
+}
+
+Table split_allocation {
+  allocation_id integer [pk, increment]
+  associate_group_id integer [note: 'Optional group used to prepare this split.']
+  amount_paise integer [not null, note: 'Positive total allocation amount stored in paise.']
+  note text [not null, default: '']
+  date text [not null, note: 'ISO-8601 date text.']
+
+  indexes {
+    associate_group_id [name: 'split_allocation_group']
+    date [name: 'split_allocation_date']
+  }
+
+  Note: 'Allocation header. The application must ensure its participant split amounts add up to amount_paise.'
+}
+
+Table split_allocation_mapping {
+  id integer [pk, increment]
+  allocation_id integer [not null]
+  associate_id integer [not null, note: 'Associate receiving or owing this portion of the split.']
+  split_amount_paise integer [not null, note: 'Positive associate share stored in paise.']
+
+  indexes {
+    (allocation_id, associate_id) [unique]
+    associate_id [name: 'split_allocation_mapping_associate']
+  }
+  Note: 'This table with associate_id will be restricted with associate_group that is grouped in associate_group_mapping'
+}
+
+Table plan_type {
+  id integer [pk, increment]
+  plan text [not null, unique, note: 'Examples: Monthly Spends, Savings, Investments, Exploration, Travel, Other.']
+}
+
+Table money_plans {
+  id integer [pk, increment]
+  plan_id integer [not null]
+  note text [not null, default: '']
+  planned_amount integer [not null, note: 'Non-negative amount stored in paise.']
+  month_year text [not null, note: 'Month key used for monthly tracking.']
+  created_at text [not null, default: `CURRENT_TIMESTAMP`]
+}
+
+Table subscriptions {
+  id integer [pk, increment]
+  subscription_name text [not null]
+  amount_paise integer [not null, note: 'Positive subscription amount stored in paise.']
+  subscription_date integer [not null, note: 'Billing day of the month, restricted to 1 through 28.']
+  type integer [not null, note: '0 = monthly; 1 = yearly.']
+  is_active integer [not null, default: 1, note: 'Boolean flag: 0 or 1.']
+  notify_me integer [not null, default: 0, note: 'Boolean flag: 0 or 1.']
+  subscription_link text [note: 'Optional URL for managing, upgrading, or cancelling the subscription.']
+
+  indexes {
+    (is_active, subscription_date) [name: 'subscriptions_active_billing_day']
+  }
+
+  Note: 'For yearly subscriptions, subscription_date supplies only the day. A billing month or next-billing date will be required before yearly notifications can be scheduled accurately.'
+}
+
+Table loans {
+  id integer [pk, increment]
+  total_amount_paise integer [not null, note: 'Positive original loan amount stored in paise.']
+  amount_paid_paise integer [not null, default: 0, note: 'Non-negative paid amount stored in paise.']
+  note text [not null, default: '']
+  start_date text [not null, note: 'ISO-8601 date text.']
+  end_date text [note: 'Optional ISO-8601 date; revolving loans may not have a fixed end date.']
+  status text [not null, default: 'PENDING', note: 'One of: PENDING, FULLY_PAID.']
+  loan_type text [not null, note: 'One of: REVOLVING, ONE_TIME, EMI_AMORTIZING.']
+  is_emi integer [not null, default: 0, note: 'Boolean flag: 1 when the loan is repaid through EMIs; otherwise 0.']
+
+  indexes {
+    status [name: 'loans_status']
+  }
+
+  Note: 'amount_paid_paise is a cached total and must remain consistent with paid loan-tracking records. is_emi identifies installment-based repayment; loan_type retains the broader loan classification.'
+}
+
+Table loan_tracking {
+  id integer [pk, increment]
+  loan_id integer [not null]
+  principal_paise integer [not null, note: 'Principal portion for the monthly period, stored in paise.']
+  interest_paise integer [not null, note: 'Interest portion for the monthly period, stored in paise.']
+  date text [not null, note: 'Tracked monthly period, represented as an ISO-compatible month/date value.']
+  is_paid integer [not null, default: 0, note: 'Boolean flag: 0 or 1.']
+
+  indexes {
+    (loan_id, date) [unique]
+    (is_paid, date) [name: 'loan_tracking_payment_schedule']
+  }
+}
+
+Table settings {
+  key text [pk]
+  value text [not null]
+
+  Note: 'Key-value application preferences and synchronization flags.'
+}
+
+Table sms_sync_log {
+  id integer [pk, increment]
+  completed_at text [not null, note: 'ISO-8601 date/time text.']
+  imported integer [not null, note: 'Number of imported transactions in the run.']
+  automatic integer [not null, note: 'Boolean flag: 0 or 1.']
+}
+
+Ref: transactions.category_id > categories.id [delete: restrict]
+Ref: transactions.bank_id > banks.id [delete: restrict]
+Ref: transactions.associate_id > associates.id [delete: restrict]
+Ref: transaction_receipt_chunks.transaction_id > transactions.id [delete: cascade]
+Ref: debts.associate_id > associates.id [delete: restrict]
+Ref: debt_receipt_chunks.debt_id > debts.id [delete: cascade]
+Ref: repayments.debt_id > debts.id [delete: cascade]
+Ref: money_plans.plan_id > plan_type.id [delete: restrict]
+Ref: associate_group_mapping.group_id > associate_group.group_id [delete: cascade]
+Ref: associate_group_mapping.associate_id > associates.id [delete: restrict]
+Ref: split_allocation.associate_group_id > associate_group.group_id [delete: set null]
+Ref: split_allocation_mapping.allocation_id > split_allocation.allocation_id [delete: cascade]
+Ref: split_allocation_mapping.associate_id > associates.id [delete: restrict]
+Ref: loan_tracking.loan_id > loans.id [delete: cascade]
+
+TableGroup Money {
+  transactions
+  transaction_receipt_chunks
+}
+
+TableGroup Debt {
+  debts
+  repayments
+  debt_receipt_chunks
+}
+
+TableGroup Planning {
+  money_plans
+}
+
+TableGroup Splitting {
+  associate_group
+  associate_group_mapping
+  split_allocation
+  split_allocation_mapping
+}
+
+TableGroup Commitments {
+  subscriptions
+  loans
+  loan_tracking
+}
+
+TableGroup ReferenceData {
+  banks
+  categories
+  associates
+  plan_type
+}
+
+TableGroup ApplicationSupport {
+  settings
+  sms_sync_log
+}
+
+

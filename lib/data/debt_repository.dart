@@ -6,7 +6,17 @@ import '../domain/debt.dart';
 import '../domain/money.dart';
 
 Future<void> createDebtSchema(DatabaseExecutor db) async {
-  await db.execute('''CREATE TABLE debts (
+  await _createDebtsTable(db);
+  await _createDebtReceiptChunksTable(db);
+  await _createRepaymentsTable(db);
+}
+
+/// Stores an amount owed to or by the user, optionally linked to a payment.
+/// Connected to: transactions through transaction_id; parent of repayments and
+/// debt_receipt_chunks.
+/// Last schema update: version 5, 2026-09-27.
+Future<void> _createDebtsTable(DatabaseExecutor db) async {
+  await db.execute('''CREATE TABLE IF NOT EXISTS debts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     transaction_id INTEGER REFERENCES transactions(id) ON DELETE RESTRICT,
     person TEXT NOT NULL CHECK(length(trim(person)) > 0),
@@ -15,22 +25,71 @@ Future<void> createDebtSchema(DatabaseExecutor db) async {
     direction TEXT NOT NULL CHECK(direction IN ('owedToMe','iOwe')),
     date TEXT NOT NULL, note TEXT NOT NULL DEFAULT '',
     has_receipt INTEGER NOT NULL DEFAULT 0 CHECK(has_receipt IN (0,1)))''');
-  // Small rows avoid Android CursorWindow limits for large screenshots.
-  await db.execute('''CREATE TABLE debt_receipt_chunks (
+  await db.execute(
+    'CREATE INDEX IF NOT EXISTS debts_transaction ON debts(transaction_id)',
+  );
+}
+
+/// Stores debt receipt images in chunks small enough for Android CursorWindow.
+/// Connected to: debts through debt_id with cascade delete.
+/// Last schema update: version 2, 2026-09-12.
+Future<void> _createDebtReceiptChunksTable(DatabaseExecutor db) =>
+    db.execute('''CREATE TABLE IF NOT EXISTS debt_receipt_chunks (
     debt_id INTEGER NOT NULL REFERENCES debts(id) ON DELETE CASCADE,
     chunk_index INTEGER NOT NULL, bytes BLOB NOT NULL CHECK(length(bytes) <= 262144),
     PRIMARY KEY(debt_id, chunk_index))''');
-  await db.execute('CREATE INDEX debts_transaction ON debts(transaction_id)');
-  await db.execute('''CREATE TABLE repayments (
+
+/// Stores repayments made against a debt record.
+/// Connected to: debts through debt_id with cascade delete.
+/// Last schema update: version 2, 2026-09-12.
+Future<void> _createRepaymentsTable(DatabaseExecutor db) async {
+  await db.execute('''CREATE TABLE IF NOT EXISTS repayments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     debt_id INTEGER NOT NULL REFERENCES debts(id) ON DELETE CASCADE,
     amount_paise INTEGER NOT NULL CHECK(amount_paise > 0),
     date TEXT NOT NULL, note TEXT NOT NULL DEFAULT '')''');
-  await db.execute('CREATE INDEX repayments_debt ON repayments(debt_id)');
+  await db.execute(
+    'CREATE INDEX IF NOT EXISTS repayments_debt ON repayments(debt_id)',
+  );
 }
+
+Future<void> createPeopleSchema(DatabaseExecutor db) async {
+  await _createDebtPeopleTable(db);
+  final existing = await db.query(
+    'debts',
+    columns: ['person'],
+    orderBy: 'id ASC',
+  );
+  final batch = db.batch();
+  for (final row in existing) {
+    final name = normalizePersonName(row['person'] as String);
+    if (name.isNotEmpty) {
+      batch.insert('debt_people', {
+        'name_key': personNameKey(name),
+        'name': name,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
+  }
+  await batch.commit(noResult: true);
+}
+
+/// Stores normalized display names reused by debt forms and suggestions.
+/// Connected to: debts logically through normalized debts.person values; no
+/// foreign key is used so historical debt text remains immutable.
+/// Last schema update: version 3, 2026-09-12.
+Future<void> _createDebtPeopleTable(DatabaseExecutor db) =>
+    db.execute('''CREATE TABLE IF NOT EXISTS debt_people (
+    name_key TEXT PRIMARY KEY,
+    name TEXT NOT NULL CHECK(length(trim(name)) > 0)
+  )''');
 
 mixin SqliteDebtOperations implements DebtRepository {
   Database get debtDatabase;
+  @override
+  Future<List<String>> people() async => (await debtDatabase.query(
+    'associates',
+    orderBy: 'name COLLATE NOCASE ASC',
+  )).map((row) => row['name'] as String).toList();
   Future<int> writeTransaction(
     DatabaseExecutor db,
     MoneyTransaction transaction,
@@ -67,16 +126,33 @@ mixin SqliteDebtOperations implements DebtRepository {
     MoneyTransaction transaction,
     DebtDraft draft,
   ) async {
-    if (transaction.id != null ||
-        draft.id != null ||
-        transaction.kind != TransactionKind.expense) {
+    if (draft.id != null || transaction.kind != TransactionKind.expense) {
       throw const DebtValidationException(
-        'Create a new expense to use this split.',
+        'Only an expense can have a new friend’s share.',
       );
     }
     await debtDatabase.transaction((db) async {
       final id = await writeTransaction(db, transaction);
       await _writeDebt(db, draft.linkedTo(id));
+    });
+  }
+
+  @override
+  Future<int> saveSharedExpenses(
+    MoneyTransaction transaction,
+    List<DebtDraft> drafts,
+  ) async {
+    if (drafts.isEmpty || transaction.kind != TransactionKind.expense) {
+      throw const DebtValidationException(
+        'Add at least one friend share to split this expense.',
+      );
+    }
+    return debtDatabase.transaction<int>((db) async {
+      final id = await writeTransaction(db, transaction);
+      for (final draft in drafts) {
+        await _writeDebt(db, draft.linkedTo(id));
+      }
+      return id;
     });
   }
 
@@ -164,12 +240,32 @@ mixin SqliteDebtOperations implements DebtRepository {
         );
       }
     }
+    final name = normalizePersonName(draft.person);
+    await db.insert('debt_people', {
+      'name_key': personNameKey(name),
+      'name': name,
+    }, conflictAlgorithm: ConflictAlgorithm.ignore);
+    var associates = await db.query(
+      'associates',
+      columns: ['id'],
+      where: 'lower(trim(name)) = ?',
+      whereArgs: [personNameKey(name)],
+      limit: 1,
+    );
+    if (associates.isEmpty) {
+      final associateId = await db.insert('associates', {'name': name});
+      associates = [
+        <String, Object?>{'id': associateId},
+      ];
+    }
     final row = <String, Object?>{
       'transaction_id': draft.transactionId,
-      'person': draft.person.trim().replaceAll(RegExp(r'\s+'), ' '),
+      'person': name,
+      'associate_id': associates.single['id'] as int,
       'title': draft.title.trim(),
       'amount_paise': draft.amountPaise,
       'direction': draft.direction.name,
+      'debt_type': 'PERSONAL',
       'date': dateKey(draft.date),
       'note': draft.note.trim(),
       if (draft.receipt != null || draft.removeReceipt)
@@ -227,6 +323,12 @@ mixin SqliteDebtOperations implements DebtRepository {
     }
     return builder.takeBytes();
   }
+
+  @override
+  Future<List<Repayment>> allRepayments() async => (await debtDatabase.query(
+    'repayments',
+    orderBy: 'date DESC, id DESC',
+  )).map(Repayment.fromRow).toList();
 
   @override
   Future<List<Repayment>> repayments(int debtId) async =>

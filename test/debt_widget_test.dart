@@ -46,7 +46,11 @@ void main() {
       final repository = MemoryRepository();
       final receipts = FakeReceiptSource();
       await tester.pumpWidget(
-        YenmaApp(repository: repository, receipts: receipts),
+        YenmaApp(
+          showWelcome: false,
+          repository: repository,
+          receipts: receipts,
+        ),
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Add transaction'));
@@ -75,11 +79,12 @@ void main() {
       expect(debt.note, 'Pay whenever you can');
       expect(debt.transactionId, repository.entries.single.id);
       expect(
-        await repository.debtReceipt(debt.id),
+        await repository.transactionReceipt(repository.entries.single.id!),
         orderedEquals(receipts.image!),
       );
-      await tester.tap(find.text('Debts'));
+      await tester.tap(find.text('Debt'));
       await tester.pumpAndSettle();
+      await tap(tester, 'View all debts');
       await tap(tester, 'Dinner split');
       expect(find.text('Pay whenever you can'), findsOneWidget);
       await tap(tester, 'Record repayment');
@@ -94,7 +99,8 @@ void main() {
       expect(repository.entries, hasLength(1));
       await tester.pageBack();
       await tester.pumpAndSettle();
-      await tap(tester, 'Settled');
+      expect(find.text('Received ₹100.00'), findsOneWidget);
+      expect(find.text('Received ₹150.00'), findsOneWidget);
       expect(find.text('Dinner split'), findsOneWidget);
     },
   );
@@ -107,10 +113,14 @@ void main() {
       final repository = MemoryRepository();
       final receipts = FakeReceiptSource()..image = null;
       await tester.pumpWidget(
-        YenmaApp(repository: repository, receipts: receipts),
+        YenmaApp(
+          showWelcome: false,
+          repository: repository,
+          receipts: receipts,
+        ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Debts'));
+      await tester.tap(find.text('Debt'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Add debt'));
       await tester.pumpAndSettle();
@@ -137,6 +147,52 @@ void main() {
       expect((await repository.debts()).single.direction, DebtDirection.iOwe);
       expect((await repository.debts()).single.person, 'Bala');
       expect(repository.entries, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'debt screen summarizes both directions and keeps debt rows behind View all',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(430, 1100));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final repository = MemoryRepository();
+      final today = DateTime(2026, 10, 7);
+      await repository.saveDebt(
+        DebtDraft(
+          person: 'Asha',
+          title: 'Lunch',
+          amountPaise: 12000,
+          direction: DebtDirection.owedToMe,
+          date: today,
+        ),
+      );
+      await repository.saveDebt(
+        DebtDraft(
+          person: 'Asha',
+          title: 'Taxi',
+          amountPaise: 8000,
+          direction: DebtDirection.iOwe,
+          date: today,
+        ),
+      );
+      await repository.addRepayment(1, 2000, today, 'UPI');
+
+      await tester.pumpWidget(
+        YenmaApp(showWelcome: false, repository: repository),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Debt'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Owes you ₹100.00'), findsOneWidget);
+      expect(find.text('You owe ₹80.00'), findsOneWidget);
+      expect(find.text('Received ₹20.00'), findsOneWidget);
+      expect(find.text('Lunch'), findsNothing);
+      expect(find.text('Taxi'), findsNothing);
+
+      await tap(tester, 'View all debts');
+      expect(find.text('Lunch'), findsOneWidget);
+      expect(find.text('Taxi'), findsOneWidget);
     },
   );
 }

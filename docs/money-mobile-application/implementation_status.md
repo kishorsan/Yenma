@@ -2,7 +2,13 @@
 
 Initial increment: 11 September 2026. Project: `C:\Personal\projects\Yenma`.
 
+## Saved people — 0.2.2+4
+
+Debt and transaction split forms now suggest locally saved people. Empty fields show saved names, typing filters them, and selecting a suggestion fills the field. New names remain supported. Matching normalizes capitalization and whitespace. Schema 3 adds a persistent people registry, populated from existing debts on upgrade; names remain available after debt settlement or deletion. Failed saves do not add names. Validation: 26 unit/widget/repository tests passed; static analysis clean.
+
 ## Debt increment — 0.2.0+2
+
+UI update **0.2.1+3**: random launch-only welcome quote with immediate skip and automatic two-second dismissal; compact page headings and toolbars; existing Settings heading preserved. Amount typography and financial behavior are unchanged. Screen-reader navigation keeps the welcome screen until the user continues. Validation: 21 unit/widget/repository tests passed, including welcome lifecycle checks.
 
 Debt management is implemented: linked expense shares, standalone IOUs in either direction, person totals, notes, persistent image attachments, partial/full repayment history, corrections and copied reminders. SQLite now uses schema 2 with a non-destructive 1→2 migration. See [Debt management](debt_management.md) for behavior, source files and tests. The initial increment below records the foundation for this feature.
 

@@ -4,10 +4,38 @@ import 'package:intl/intl.dart';
 import '../app/money_controller.dart';
 import '../app/theme.dart';
 import '../domain/money.dart';
+import '../domain/debt.dart';
 import 'transaction_form.dart';
 import 'transaction_detail.dart';
 import 'debts/debts_screen.dart';
 import 'debts/debt_form.dart';
+import 'bulk_categorization_screen.dart';
+import 'card_transactions_screen.dart';
+import 'split/split_screen.dart';
+import 'monthly_plan_screen.dart';
+import 'subscriptions/subscriptions_screen.dart';
+import 'emi/emi_screen.dart';
+import 'loans/loan_screen.dart';
+
+class _YenmaDestination {
+  const _YenmaDestination(this.icon, this.selectedIcon, this.label);
+  final IconData icon;
+  final IconData selectedIcon;
+  final String label;
+
+  NavigationDestination get navigation => NavigationDestination(
+    icon: Icon(icon),
+    selectedIcon: Icon(selectedIcon),
+    label: label,
+  );
+}
+
+const _yenmaDestinations = <_YenmaDestination>[
+  _YenmaDestination(Icons.home_outlined, Icons.home_rounded, 'Home'),
+  _YenmaDestination(Icons.credit_card_outlined, Icons.credit_card, 'Cards'),
+  _YenmaDestination(Icons.category_outlined, Icons.category, 'Categorize'),
+  _YenmaDestination(Icons.tune_outlined, Icons.tune, 'Settings'),
+];
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key, required this.controller});
@@ -47,6 +75,185 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     ),
   );
 
+  Future<void> _openPlan() async {
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => MonthlyPlanScreen(controller: controller),
+      ),
+    );
+    if (saved == true) await controller.loadMonth(controller.month);
+  }
+
+  void _openSplit() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => SplitGroupsScreen(controller: controller),
+    ),
+  );
+
+  void _openSubscriptions() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => SubscriptionsScreen(controller: controller),
+    ),
+  );
+
+  void _openEmis() => Navigator.of(context).push(
+    MaterialPageRoute<void>(builder: (_) => EmiScreen(controller: controller)),
+  );
+
+  void _openLoans() => Navigator.of(context).push(
+    MaterialPageRoute<void>(builder: (_) => LoanScreen(controller: controller)),
+  );
+
+  Future<void> _editEmiGst() async {
+    final current = await controller.loadGstBasisPoints();
+    if (!mounted) return;
+    final text = TextEditingController(
+      text: current % 100 == 0
+          ? '${current ~/ 100}'
+          : '${current ~/ 100}.${(current % 100).toString().padLeft(2, '0')}',
+    );
+    final form = GlobalKey<FormState>();
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('EMI GST rate'),
+        content: Form(
+          key: form,
+          child: TextFormField(
+            controller: text,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(
+              labelText: 'GST percentage',
+              suffixText: '%',
+            ),
+            validator: (value) {
+              final percent = double.tryParse((value ?? '').trim());
+              return percent == null ||
+                      !percent.isFinite ||
+                      percent < 0 ||
+                      percent > 100
+                  ? 'Enter a percentage from 0 to 100'
+                  : null;
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              if (!form.currentState!.validate()) return;
+              final basisPoints = (double.parse(text.text.trim()) * 100)
+                  .round();
+              await controller.saveGstBasisPoints(basisPoints);
+              if (dialogContext.mounted) Navigator.pop(dialogContext, true);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    text.dispose();
+    if (saved == true && mounted) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('EMI GST rate saved.')));
+    }
+  }
+
+  void _openDebts() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (debtContext) => Scaffold(
+        appBar: AppBar(title: const Text('Debt')),
+        body: DebtsScreen(controller: controller),
+        floatingActionButton: FloatingActionButton.extended(
+          onPressed: () => Navigator.of(debtContext).push(
+            MaterialPageRoute<bool>(
+              builder: (_) => DebtForm(controller: controller),
+            ),
+          ),
+          icon: const Icon(Icons.add),
+          label: const Text('Add debt'),
+        ),
+      ),
+    ),
+  );
+
+  Future<void> _syncWithConsent() async {
+    if (!controller.smsConsentGranted) {
+      final allowed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Allow message access?'),
+          content: const Text(
+            'Yenma will read transaction messages from your device only when you sync. '
+            'Messages stay on this device and are used to create transaction entries. '
+            'You can deny the Android permission or stop using message sync at any time.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Not now'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      );
+      if (allowed != true || !mounted) return;
+      await controller.grantSmsConsent();
+    }
+    await controller.syncMessages();
+    if (!mounted || controller.syncMessage == null) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(controller.syncMessage!)));
+  }
+
+  Future<void> _deleteWithUndo(MoneyTransaction transaction) async {
+    try {
+      await controller.delete(transaction.id!);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Transaction deleted'),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () async {
+              try {
+                await controller.restore(transaction);
+              } catch (_) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Could not undo the deletion'),
+                    ),
+                  );
+                }
+              }
+            },
+          ),
+        ),
+      );
+    } catch (error) {
+      await controller.loadMonth(controller.month);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error is DebtValidationException
+                ? error.message
+                : 'Could not delete. Please try again.',
+          ),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: controller,
@@ -55,11 +262,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           !controller.initializing && controller.categories.isNotEmpty;
       return Scaffold(
         appBar: AppBar(
+          toolbarHeight: _tab == 3 ? kToolbarHeight : 48,
+          titleTextStyle: _tab == 3
+              ? Theme.of(context).textTheme.titleLarge
+              : null,
           title: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                padding: const EdgeInsets.all(8),
+                padding: EdgeInsets.all(_tab == 3 ? 8 : 6),
                 decoration: BoxDecoration(
                   color: Theme.of(context).colorScheme.primaryContainer,
                   borderRadius: BorderRadius.circular(12),
@@ -70,82 +281,91 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 ),
               ),
               const SizedBox(width: 10),
-              const Text(
+              Text(
                 'yenma',
                 style: TextStyle(
                   fontWeight: FontWeight.w800,
                   letterSpacing: -1,
+                  fontSize: _tab == 3 ? null : 19,
                 ),
               ),
             ],
           ),
           actions: [
-            Padding(
-              padding: const EdgeInsets.only(right: 20),
-              child: Text(
-                'MONEY, IN VIEW',
-                style: Theme.of(context).textTheme.labelSmall
-                    ?.copyWith(letterSpacing: 1.2),
+            if (_tab == 0)
+              IconButton(
+                tooltip: 'Sync bank messages',
+                onPressed: !ready || controller.syncing
+                    ? null
+                    : _syncWithConsent,
+                icon: controller.syncing
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.sync),
               ),
-            ),
-          ],
-        ),
-        body: controller.initializing
-            ? const Center(child: CircularProgressIndicator())
-            : !ready
-            ? _failure(
-                controller.error ?? 'Unable to open your data',
-                controller.initialize,
-              )
-            : Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 840),
-                  child: _tab == 3
-                      ? _settings()
-                      : _tab == 2
-                      ? DebtsScreen(controller: controller)
-                      : _ledger(),
+            if (_tab == 3)
+              Padding(
+                padding: const EdgeInsets.only(right: 20),
+                child: Text(
+                  'MONEY, IN VIEW',
+                  style: Theme.of(context).textTheme.labelSmall
+                      ?.copyWith(letterSpacing: 1.2),
                 ),
               ),
-        floatingActionButton: ready && _tab != 3
-            ? FloatingActionButton.extended(
-                onPressed: _tab == 2
-                    ? () => Navigator.push(
-                        context,
-                        MaterialPageRoute<bool>(
-                          builder: (_) => DebtForm(controller: controller),
-                        ),
-                      )
-                    : _add,
-                icon: const Icon(Icons.add),
-                label: Text(_tab == 2 ? 'Add debt' : 'Add transaction'),
-              )
-            : null,
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: _tab,
-          onDestinationSelected: (value) => setState(() => _tab = value),
-          destinations: const [
-            NavigationDestination(
-              icon: Icon(Icons.grid_view_outlined),
-              selectedIcon: Icon(Icons.grid_view_rounded),
-              label: 'Overview',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.receipt_long_outlined),
-              selectedIcon: Icon(Icons.receipt_long),
-              label: 'Transactions',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.handshake_outlined),
-              selectedIcon: Icon(Icons.handshake),
-              label: 'Debts',
-            ),
-            NavigationDestination(
-              icon: Icon(Icons.tune_outlined),
-              label: 'Settings',
-            ),
           ],
         ),
+        body: LayoutBuilder(
+          builder: (context, constraints) {
+            final content = controller.initializing
+                ? const Center(child: CircularProgressIndicator())
+                : !ready
+                ? _failure(
+                    controller.error ?? 'Unable to open your data',
+                    controller.initialize,
+                  )
+                : Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 840),
+                      child: _tab == 3
+                          ? _settings()
+                          : _tab == 2
+                          ? BulkCategorizationScreen(
+                              controller: controller,
+                              embedded: true,
+                            )
+                          : _tab == 1
+                          ? CardTransactionsScreen(controller: controller)
+                          : _ledger(),
+                    ),
+                  );
+            if (constraints.maxWidth < 700) return content;
+            return Row(
+              children: [
+                _navigationRail(),
+                Expanded(child: content),
+              ],
+            );
+          },
+        ),
+        floatingActionButton: ready && _tab == 0
+            ? FloatingActionButton.extended(
+                onPressed: _add,
+                icon: const Icon(Icons.add),
+                label: const Text('Add transaction'),
+              )
+            : null,
+        bottomNavigationBar: MediaQuery.sizeOf(context).width < 700
+            ? NavigationBar(
+                selectedIndex: _tab,
+                onDestinationSelected: (value) => setState(() => _tab = value),
+                destinations: _yenmaDestinations
+                    .map((destination) => destination.navigation)
+                    .toList(),
+              )
+            : null,
       );
     },
   );
@@ -166,6 +386,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     ),
   );
 
+  Widget _navigationRail() => NavigationRail(
+    selectedIndex: _tab,
+    onDestinationSelected: (value) => setState(() => _tab = value),
+    labelType: NavigationRailLabelType.all,
+    destinations: _yenmaDestinations
+        .map(
+          (destination) => NavigationRailDestination(
+            icon: destination.navigation.icon,
+            selectedIcon: destination.navigation.selectedIcon,
+            label: Text(destination.label),
+          ),
+        )
+        .toList(),
+  );
+
   Widget _ledger() {
     final items = _tab == 0
         ? controller.transactions.take(5).toList()
@@ -183,26 +418,17 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 children: [
                   Text(
                     _tab == 0
-                        ? 'Your money,\na little clearer.'
+                        ? 'Your money, a little clearer.'
                         : 'Your transactions',
-                    style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -1,
-                    ),
+                    style: Theme.of(context).textTheme.titleMedium
+                        ?.copyWith(fontWeight: FontWeight.w700),
                   ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _tab == 0
-                        ? 'Small habits. A bigger picture.'
-                        : 'Every income, expense and transfer in one place.',
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  _monthSelector(),
                   const SizedBox(height: 20),
                   if (!controller.loading && controller.error == null) ...[
+                    _bankCarousel(),
+                    const SizedBox(height: 24),
+                    _featureGrid(),
+                    const SizedBox(height: 24),
                     _summary(),
                     const SizedBox(height: 24),
                     if (_tab == 0 &&
@@ -217,14 +443,14 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                             _tab == 0
                                 ? 'Recent activity'
                                 : '${controller.transactions.length} transactions',
-                            style: Theme.of(context).textTheme.titleLarge
+                            style: Theme.of(context).textTheme.titleMedium
                                 ?.copyWith(fontWeight: FontWeight.bold),
                           ),
                         ),
                         if (_tab == 0)
                           TextButton(
                             onPressed: () => setState(() => _tab = 1),
-                            child: const Text('View all'),
+                            child: const Text('View cards'),
                           ),
                       ],
                     ),
@@ -300,64 +526,197 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _monthSelector() => Card(
-    child: Row(
-      children: [
-        IconButton(
-          tooltip: 'Previous month',
-          onPressed:
-              controller.month.year == 1900 && controller.month.month == 1
-              ? null
-              : () => controller.loadMonth(
-                  DateTime(controller.month.year, controller.month.month - 1),
+  Widget _bankCarousel() {
+    final grouped = <String, List<MoneyTransaction>>{};
+    for (final transaction in controller.transactions) {
+      final name = transaction.bankName?.trim();
+      if (name == null || name.isEmpty) continue;
+      grouped.putIfAbsent(name, () => []).add(transaction);
+    }
+    final names = grouped.keys.toList()
+      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    if (names.isEmpty) {
+      return SizedBox(
+        height: 164,
+        child: Card(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              children: [
+                const Icon(Icons.account_balance_outlined, size: 34),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Your cards will appear here',
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 6),
+                      const Text(
+                        'Sync SMS transactions to recognize supported banks.',
+                      ),
+                    ],
+                  ),
                 ),
-          icon: const Icon(Icons.chevron_left),
-        ),
-        Expanded(
-          child: TextButton(
-            onPressed: () => controller.loadMonth(DateTime.now()),
-            child: Text(
-              DateFormat.yMMMM().format(controller.month),
-              textAlign: TextAlign.center,
+              ],
             ),
           ),
         ),
-        IconButton(
-          tooltip: 'Next month',
-          onPressed:
-              controller.month.year == 2100 && controller.month.month == 12
-              ? null
-              : () => controller.loadMonth(
-                  DateTime(controller.month.year, controller.month.month + 1),
+      );
+    }
+    return SizedBox(
+      height: 164,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: names.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 12),
+        itemBuilder: (context, index) {
+          final name = names[index];
+          final transactions = grouped[name]!;
+          final expense = transactions
+              .where((item) => item.kind == TransactionKind.expense)
+              .fold<int>(0, (total, item) => total + item.amountPaise);
+          return SizedBox(
+            width: 260,
+            child: Card(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(24),
+                onTap: () => setState(() => _tab = 1),
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          const Icon(Icons.credit_card_outlined),
+                          const Spacer(),
+                          Text('${transactions.length} entries'),
+                        ],
+                      ),
+                      const Spacer(),
+                      Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        formatMoney(expense),
+                        style: TextStyle(
+                          color: context.yenmaColors.expense,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-          icon: const Icon(Icons.chevron_right),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _featureGrid() {
+    final features = <({String label, IconData icon, VoidCallback open})>[
+      (label: 'Plan', icon: Icons.calendar_month_outlined, open: _openPlan),
+      (label: 'Split', icon: Icons.group_outlined, open: _openSplit),
+      (
+        label: 'Subscriptions',
+        icon: Icons.subscriptions_outlined,
+        open: _openSubscriptions,
+      ),
+      (label: 'EMI', icon: Icons.event_repeat_outlined, open: _openEmis),
+      (label: 'Loan', icon: Icons.account_balance_outlined, open: _openLoans),
+      (label: 'Debt', icon: Icons.handshake_outlined, open: _openDebts),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Your money tools',
+          style: Theme.of(context).textTheme.titleMedium
+              ?.copyWith(fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final itemWidth = (constraints.maxWidth - 24) / 3;
+            return Wrap(
+              spacing: 12,
+              runSpacing: 12,
+              children: features
+                  .map(
+                    (feature) => SizedBox(
+                      width: itemWidth,
+                      child: Card(
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(24),
+                          onTap: feature.open,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 18,
+                            ),
+                            child: Column(
+                              children: [
+                                CircleAvatar(child: Icon(feature.icon)),
+                                const SizedBox(height: 10),
+                                Text(
+                                  feature.label,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  )
+                  .toList(),
+            );
+          },
         ),
       ],
-    ),
-  );
+    );
+  }
 
   Widget _summary() {
     final summary = controller.summary;
+    final colors = context.yenmaColors;
     return Column(
       children: [
         Container(
           width: double.infinity,
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            color: const Color(0xFF153D32),
+            color: colors.heroSurface,
             borderRadius: BorderRadius.circular(28),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Row(
+              Row(
                 children: [
-                  Icon(Icons.north_east, color: mint, size: 18),
-                  SizedBox(width: 8),
+                  Icon(Icons.north_east, color: colors.onHeroSurface, size: 18),
+                  const SizedBox(width: 8),
                   Text(
                     'MONTHLY SPENDING',
                     style: TextStyle(
-                      color: mint,
+                      color: colors.onHeroSurface,
                       letterSpacing: 1.5,
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
@@ -370,10 +729,10 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 fit: BoxFit.scaleDown,
                 child: Text(
                   formatMoney(summary.expense),
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 38,
                     fontWeight: FontWeight.w700,
-                    color: Colors.white,
+                    color: colors.onHeroSurface,
                     letterSpacing: -1,
                   ),
                 ),
@@ -381,7 +740,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               const SizedBox(height: 16),
               Text(
                 '${controller.transactions.length} entries  ·  Transfers excluded',
-                style: const TextStyle(color: Color(0xFFBBD4CB)),
+                style: TextStyle(color: colors.onHeroSurfaceMuted),
               ),
             ],
           ),
@@ -399,7 +758,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     : TransactionKind.income,
               ),
             ];
-            return constraints.maxWidth < 360 ||
+            return constraints.maxWidth < 320 ||
                     MediaQuery.textScalerOf(context).scale(1) > 1.4
                 ? Column(
                     children: [cards[0], const SizedBox(height: 12), cards[1]],
@@ -435,7 +794,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w700,
-                  color: kindColor(kind, Theme.of(context).brightness),
+                  color: kindColor(kind, context),
                 ),
               ),
             ),
@@ -494,8 +853,8 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   Widget _transactionTile(MoneyTransaction transaction) {
     final category = controller.category(transaction.categoryId);
-    final color = kindColor(transaction.kind, Theme.of(context).brightness);
-    return Card(
+    final color = kindColor(transaction.kind, context);
+    final tile = Card(
       child: InkWell(
         borderRadius: BorderRadius.circular(24),
         onTap: () => Navigator.push(
@@ -536,7 +895,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${category.name} · ${DateFormat.MMMd().format(transaction.date)}',
+                      '${category.name} · ${DateFormat.MMMd().add_jm().format(transaction.date)}',
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     const SizedBox(height: 6),
@@ -555,6 +914,26 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ),
       ),
+    );
+    if (_tab != 1) return tile;
+    return Dismissible(
+      key: ValueKey('transaction-${transaction.id}'),
+      direction: DismissDirection.endToStart,
+      background: const SizedBox.shrink(),
+      secondaryBackground: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        decoration: BoxDecoration(
+          color: Theme.of(context).colorScheme.errorContainer,
+          borderRadius: BorderRadius.circular(24),
+        ),
+        child: Icon(
+          Icons.delete_outline,
+          color: Theme.of(context).colorScheme.onErrorContainer,
+        ),
+      ),
+      onDismissed: (_) => _deleteWithUndo(transaction),
+      child: tile,
     );
   }
 
@@ -615,24 +994,31 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
       ),
       const SizedBox(height: 16),
-      const Card(
+      Card(
         child: Column(
           children: [
-            ListTile(
+            const ListTile(
               leading: Icon(Icons.currency_rupee),
               title: Text('Indian rupee'),
               subtitle: Text('All transactions are recorded in INR.'),
             ),
-            ListTile(
+            const ListTile(
               leading: Icon(Icons.phone_android_outlined),
               title: Text('Stored on this device'),
               subtitle: Text('Your entries stay local. No account needed.'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.percent),
+              title: const Text('EMI GST rate'),
+              subtitle: const Text('Used to calculate GST on EMI interest.'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: _editEmiGst,
             ),
           ],
         ),
       ),
       const SizedBox(height: 28),
-      Text('Yenma · 0.2.0', style: Theme.of(context).textTheme.titleMedium),
+      Text('Yenma · 0.2.2', style: Theme.of(context).textTheme.titleMedium),
       const SizedBox(height: 8),
       const Text('A quieter way to keep track of your money.'),
     ],

@@ -103,13 +103,13 @@ class _DebtDetailState extends State<DebtDetail> {
                       children: [
                         Text(
                           debt.person,
-                          style: Theme.of(context).textTheme.headlineMedium
+                          style: Theme.of(context).textTheme.titleLarge
                               ?.copyWith(fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 8),
                         Text(
                           debt.title,
-                          style: Theme.of(context).textTheme.titleLarge,
+                          style: Theme.of(context).textTheme.titleMedium,
                         ),
                         const SizedBox(height: 24),
                         Card(
@@ -135,7 +135,7 @@ class _DebtDetailState extends State<DebtDetail> {
                                 ),
                                 const SizedBox(height: 16),
                                 Text(
-                                  'Original share: ${formatMoney(debt.amountPaise)}',
+                                  'Original debt: ${formatMoney(debt.amountPaise)}',
                                 ),
                                 Text(
                                   'Repaid: ${formatMoney(debt.repaidPaise)}',
@@ -170,7 +170,7 @@ class _DebtDetailState extends State<DebtDetail> {
                               leading: const Icon(Icons.receipt_long_outlined),
                               title: const Text('Linked payment'),
                               subtitle: const Text(
-                                'View the original expense and all its shares',
+                                'View the original payment linked to this debt',
                               ),
                               trailing: const Icon(Icons.chevron_right),
                               onTap: _busy
@@ -281,9 +281,8 @@ class _DebtDetailState extends State<DebtDetail> {
                             onPressed:
                                 _busy ||
                                     widget.controller.debtError != null ||
-                                    debt.date.isAfter(
-                                      calendarDate(DateTime.now()),
-                                    )
+                                    calendarDate(debt.date)
+                                        .isAfter(calendarDate(DateTime.now()))
                                 ? null
                                 : () async {
                                     final saved = await Navigator.push<bool>(
@@ -300,7 +299,8 @@ class _DebtDetailState extends State<DebtDetail> {
                             icon: const Icon(Icons.check_circle_outline),
                             label: const Text('Record repayment'),
                           ),
-                        if (debt.date.isAfter(calendarDate(DateTime.now())))
+                        if (calendarDate(debt.date)
+                            .isAfter(calendarDate(DateTime.now())))
                           const Text(
                             'Repayments can be recorded on or after the debt date.',
                           ),

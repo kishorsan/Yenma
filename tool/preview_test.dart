@@ -11,13 +11,24 @@ import 'package:yenma/domain/debt.dart';
 
 import '../test/support/memory_repository.dart';
 
+class TwoWeekPreviewRepository extends MemoryRepository {
+  @override
+  Future<List<MoneyTransaction>> transactions(DateTime month) async =>
+      entries.toList()..sort((a, b) {
+        final date = b.date.compareTo(a.date);
+        return date == 0 ? b.id!.compareTo(a.id!) : date;
+      });
+}
+
 void main() {
   for (final theme in ['light', 'dark']) {
-    testWidgets('$theme overview preview with synthetic transactions', (
+    testWidgets('$theme home preview with two weeks of bank transactions', (
       tester,
     ) async {
-      await tester.binding.setSurfaceSize(const Size(430, 932));
-      addTearDown(() => tester.binding.setSurfaceSize(null));
+      tester.view.physicalSize = const Size(430, 932);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
       await tester.runAsync(() async {
         final icons = FontLoader('MaterialIcons')
           ..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'));
@@ -29,20 +40,30 @@ void main() {
           await loader.load();
         }
       });
-      final repository = MemoryRepository()..theme = theme;
-      for (final sample in [
-        ('Monthly salary', 6500000, TransactionKind.income, 10),
-        ('Weekly groceries', 245050, TransactionKind.expense, 2),
-        ('Lunch with friends', 68000, TransactionKind.expense, 1),
-        ('Metro top-up', 50000, TransactionKind.expense, 3),
-      ]) {
+      final repository = TwoWeekPreviewRepository()..theme = theme;
+      final today = DateTime.now();
+      final samples = [
+        ('Fresh groceries', 245050, TransactionKind.expense, 2, 0),
+        ('Metro and cab', 86000, TransactionKind.expense, 3, 2),
+        ('Electricity bill', 184500, TransactionKind.expense, 7, 4),
+        ('Streaming renewal', 49900, TransactionKind.expense, 8, 6),
+        ('Monthly salary', 6500000, TransactionKind.income, 10, 8),
+        ('Dinner with friends', 148000, TransactionKind.expense, 1, 10),
+        ('Weekend shopping', 229900, TransactionKind.expense, 4, 12),
+        ('Pharmacy', 78000, TransactionKind.expense, 5, 14),
+      ];
+      for (var index = 0; index < samples.length; index++) {
+        final sample = samples[index];
         await repository.save(
           MoneyTransaction(
             title: sample.$1,
             amountPaise: sample.$2,
             kind: sample.$3,
             categoryId: sample.$4,
-            date: DateTime.now(),
+            date: DateTime(today.year, today.month, today.day - sample.$5, 12),
+            source: 'SMS',
+            bankName: 'HDFC Bank',
+            externalId: 'preview-hdfc-$index',
           ),
         );
       }
@@ -52,7 +73,13 @@ void main() {
       await tester.pumpAndSettle();
       await expectLater(
         find.byType(YenmaApp),
-        matchesGoldenFile('../docs/previews/overview-$theme.png'),
+        matchesGoldenFile('../docs/previews/welcome-$theme.png'),
+      );
+      await tester.tap(find.text('Open my money'));
+      await tester.pumpAndSettle();
+      await expectLater(
+        find.byType(YenmaApp),
+        matchesGoldenFile('../docs/previews/home-$theme.png'),
       );
       await repository.saveDebt(
         DebtDraft(
@@ -92,10 +119,13 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();
       await tester.pumpWidget(
-        RepaintBoundary(child: YenmaApp(repository: repository)),
+        RepaintBoundary(
+          child: YenmaApp(showWelcome: false, repository: repository),
+        ),
       );
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Debts'));
+      await tester.ensureVisible(find.text('Debt'));
+      await tester.tap(find.text('Debt'));
       await tester.pumpAndSettle();
       await expectLater(
         find.byType(YenmaApp),
