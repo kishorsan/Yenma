@@ -77,10 +77,71 @@ class CommitmentsRepository
         LoanType.emiAmortizing => 'EMI_AMORTIZING',
       },
       'is_emi': value.isEmi ? 1 : 0,
+      'annual_interest_basis_points': value.annualInterestBasisPoints,
+      'regular_payment_paise': value.regularPaymentPaise,
+      'installment_count': value.installmentCount,
+      'first_due_date': value.firstDueDate?.toIso8601String(),
     };
     if (value.id == null) return db.insert('loans', row);
     await db.update('loans', row, where: 'id = ?', whereArgs: [value.id]);
     return value.id!;
+  }
+
+  @override
+  Future<int> saveLoanWithSchedule(LoanRecord value) async {
+    if (value.id != null || !value.hasGeneratedSchedule) {
+      throw ArgumentError('A new fixed monthly loan is required');
+    }
+    if (value.name.trim().isEmpty ||
+        value.totalAmountPaise <= 0 ||
+        value.annualInterestBasisPoints! < 0 ||
+        value.regularPaymentPaise! <= 0 ||
+        value.installmentCount! <= 0 ||
+        value.regularPaymentPaise! * value.installmentCount! <
+            value.totalAmountPaise ||
+        value.firstDueDate!.isBefore(value.startDate) ||
+        (value.endDate != null &&
+            value.firstDueDate!.isAfter(value.endDate!))) {
+      throw ArgumentError('Invalid amortizing loan');
+    }
+    return db.transaction((txn) async {
+      final id = await txn.insert('loans', {
+        'emi_name': value.name.trim(),
+        'total_amount_paise': value.totalAmountPaise,
+        'amount_paid_paise': 0,
+        'note': value.note.trim(),
+        'start_date': value.startDate.toIso8601String(),
+        'end_date': value.endDate?.toIso8601String(),
+        'status': 'PENDING',
+        'loan_type': 'EMI_AMORTIZING',
+        'is_emi': 0,
+        'annual_interest_basis_points': value.annualInterestBasisPoints,
+        'regular_payment_paise': value.regularPaymentPaise,
+        'installment_count': value.installmentCount,
+        'first_due_date': value.firstDueDate!.toIso8601String(),
+      });
+      final schedule = generateMonthlyLoanSchedule(
+        loanId: id,
+        principalPaise: value.totalAmountPaise,
+        annualInterestBasisPoints: value.annualInterestBasisPoints!,
+        installmentCount: value.installmentCount!,
+        firstDueDate: value.firstDueDate!,
+        regularPaymentPaise: value.regularPaymentPaise,
+      );
+      final batch = txn.batch();
+      for (final payment in schedule) {
+        batch.insert('loan_tracking', {
+          'loan_id': id,
+          'principal_paise': payment.principalPaise,
+          'interest_paise': payment.interestPaise,
+          'gst_paise': 0,
+          'date': payment.date.toIso8601String(),
+          'is_paid': 0,
+        });
+      }
+      await batch.commit(noResult: true);
+      return id;
+    });
   }
 
   @override
@@ -108,6 +169,12 @@ class CommitmentsRepository
       'ONE_TIME' => LoanType.oneTime,
       _ => LoanType.emiAmortizing,
     },
+    annualInterestBasisPoints: row['annual_interest_basis_points'] as int?,
+    regularPaymentPaise: row['regular_payment_paise'] as int?,
+    installmentCount: row['installment_count'] as int?,
+    firstDueDate: row['first_due_date'] == null
+        ? null
+        : DateTime.parse(row['first_due_date'] as String),
   );
 
   @override
@@ -116,7 +183,7 @@ class CommitmentsRepository
             'loan_tracking',
             where: 'loan_id = ?',
             whereArgs: [loanId],
-            orderBy: 'date DESC, id DESC',
+            orderBy: 'date ASC, id ASC',
           ))
           .map(
             (row) => LoanTrackingRecord(

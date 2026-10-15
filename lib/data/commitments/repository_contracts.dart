@@ -44,6 +44,9 @@ abstract interface class LoanRepository {
   /// Inserts or updates a loan and returns its database identifier.
   Future<int> saveLoan(LoanRecord value);
 
+  /// Creates a loan and its complete calculated monthly schedule atomically.
+  Future<int> saveLoanWithSchedule(LoanRecord value);
+
   /// Loads non-EMI loans in display order.
   Future<List<LoanRecord>> loans();
 

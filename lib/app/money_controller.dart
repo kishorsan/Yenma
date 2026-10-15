@@ -10,6 +10,8 @@ import '../domain/monthly_plan.dart';
 import '../domain/split.dart';
 import '../data/receipt_source.dart';
 import '../data/sms_sync.dart';
+import '../data/sms_transaction_pipeline.dart';
+import '../domain/import_foundation.dart';
 import '../models/commitments/emi.dart';
 import '../models/commitments/loan.dart';
 import '../models/commitments/subscription.dart';
@@ -101,54 +103,72 @@ class MoneyController extends ChangeNotifier {
     syncMessage = null;
     _emit();
     try {
-      final now = DateTime.now();
-      final lastSync = await repository.lastSmsSyncAt();
-      final from = initialSmsSyncComplete
-          ? (lastSync ?? DateTime(now.year, now.month, now.day))
-          : DateTime(now.year, now.month - 3, now.day);
+      final startedAt = DateTime.now();
+      final now = startedAt;
+      final coveredThrough = await repository.importCursor('sms');
+      final from = coveredThrough ?? DateTime(now.year, now.month - 3, now.day);
       final messages = await sms.read(from: from, until: now);
-      final imports = <MoneyTransaction>[];
+      final records = <ImportRecord>[];
       for (final message in messages) {
-        final parsed = SmsParser.parse(message);
-        if (parsed == null) continue;
-        final learned = parsed.recipientKey == null
+        final parsed = SmsTransactionPipeline.parse(message);
+        final learned = parsed?.recipientKey == null
             ? null
-            : await repository.categoryForRecipient(parsed.recipientKey!);
-        imports.add(
-          learned == null
-              ? parsed
-              : MoneyTransaction(
-                  title: parsed.title,
-                  amountPaise: parsed.amountPaise,
-                  kind: parsed.kind,
-                  categoryId: learned,
-                  date: parsed.date,
-                  note: parsed.note,
-                  source: parsed.source,
-                  bankName: parsed.bankName,
-                  instrumentType: parsed.instrumentType,
-                  instrumentLast4: parsed.instrumentLast4,
-                  importRole: parsed.importRole,
-                  externalId: parsed.externalId,
-                  recipientKey: parsed.recipientKey,
-                ),
+            : await repository.categoryForRecipient(parsed!.recipientKey!);
+        final categorized = learned == null
+            ? parsed
+            : MoneyTransaction(
+                title: parsed!.title,
+                amountPaise: parsed.amountPaise,
+                kind: parsed.kind,
+                categoryId: learned,
+                date: parsed.date,
+                note: parsed.note,
+                source: parsed.source,
+                bankName: parsed.bankName,
+                instrumentType: parsed.instrumentType,
+                instrumentLast4: parsed.instrumentLast4,
+                importRole: parsed.importRole,
+                externalId: parsed.externalId,
+                recipientKey: parsed.recipientKey,
+              );
+        records.add(
+          ImportRecord(
+            source: 'sms',
+            sourceItemId: SmsTransactionPipeline.sourceItemId(message),
+            rawPayload: '${message.address}\n${message.body}',
+            receivedAt: message.timestamp,
+            transaction: categorized,
+            rejectionReason: parsed == null ? 'unsupported_message' : null,
+          ),
         );
       }
-      final count = await repository.importTransactions(imports);
+      final result = await repository.importRecords(records);
+      await repository.saveImportCursor('sms', now);
       if (!initialSmsSyncComplete) {
         await repository.saveInitialSmsSyncComplete();
         initialSmsSyncComplete = true;
       }
       await repository.recordSmsSync(
         completedAt: now,
-        imported: count,
+        imported: result.imported,
         automatic: automatic,
+      );
+      await repository.recordImportRun(
+        ImportRunDiagnostic(
+          source: 'sms',
+          startedAt: startedAt,
+          completedAt: DateTime.now(),
+          from: from,
+          until: now,
+          automatic: automatic,
+          result: result,
+        ),
       );
       await repository.markSynced(DateTime.now());
       await loadMonth(month);
-      syncMessage = count == 0
+      syncMessage = result.imported == 0
           ? 'Transactions are already up to date'
-          : '$count transaction${count == 1 ? '' : 's'} synced';
+          : '${result.imported} transaction${result.imported == 1 ? '' : 's'} synced';
     } on PlatformException catch (error) {
       syncMessage = error.code == 'permission_denied'
           ? 'SMS permission is needed to sync transactions'
@@ -201,6 +221,9 @@ class MoneyController extends ChangeNotifier {
   Future<List<LoanRecord>> loans() => repository.loans();
 
   Future<int> saveLoan(LoanRecord loan) => repository.saveLoan(loan);
+
+  Future<int> saveLoanWithSchedule(LoanRecord loan) =>
+      repository.saveLoanWithSchedule(loan);
 
   Future<List<LoanTrackingRecord>> loanPayments(int loanId) =>
       repository.loanPayments(loanId);

@@ -11,20 +11,21 @@ Future<void> seedEmiPreviewData(
     EmiRecord(
       name: 'Laptop EMI',
       principalPaise: 9000000,
-      processingFeePaise: 99900,
+      processingFeePaise: 29900,
       billingDay: 5,
-      startDate: addPreviewMonths(anchor, -4),
-      endDate: addPreviewMonths(anchor, 7),
+      startDate: previewMonthDay(anchor, -4, 5),
+      endDate: previewMonthDay(anchor, 7, 5),
       note: '12-month no-cost EMI',
     ),
   );
-  for (var monthsAgo = 2; monthsAgo >= 0; monthsAgo--) {
+  for (var monthOffset = -4; monthOffset <= 7; monthOffset++) {
+    final installmentDate = previewMonthDay(anchor, monthOffset, 5);
     await repository.saveEmiInstallment(
       emiId: laptopId,
       principalPaise: 750000,
       interestPaise: 0,
-      date: previewMonthDay(anchor, -monthsAgo, 5),
-      isPaid: monthsAgo > 0 || anchor.day >= 5,
+      date: installmentDate,
+      isPaid: !installmentDate.isAfter(anchor),
     );
   }
 

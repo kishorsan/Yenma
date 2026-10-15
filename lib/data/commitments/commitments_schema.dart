@@ -32,7 +32,11 @@ Future<void> createCommitmentsSchema(DatabaseExecutor db) async {
     end_date TEXT,
     status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','FULLY_PAID')),
     loan_type TEXT NOT NULL CHECK(loan_type IN ('REVOLVING','ONE_TIME','EMI_AMORTIZING')),
-    is_emi INTEGER NOT NULL DEFAULT 0 CHECK(is_emi IN (0,1))
+    is_emi INTEGER NOT NULL DEFAULT 0 CHECK(is_emi IN (0,1)),
+    annual_interest_basis_points INTEGER CHECK(annual_interest_basis_points >= 0),
+    regular_payment_paise INTEGER CHECK(regular_payment_paise > 0),
+    installment_count INTEGER CHECK(installment_count > 0),
+    first_due_date TEXT
   )''');
   await db.execute('CREATE INDEX IF NOT EXISTS loans_status ON loans(status)');
   // Each row records a dated principal/interest breakdown for a loan or EMI.

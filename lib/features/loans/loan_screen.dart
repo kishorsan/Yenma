@@ -352,6 +352,26 @@ class _LoanDetailScreenState extends State<LoanDetailScreen> {
                             formatMoney(_loan.amountPaidPaise),
                           ),
                           _fact('Loan type', _loanTypeLabel(_loan.type)),
+                          if (_loan.annualInterestBasisPoints != null)
+                            _fact(
+                              'Derived annual interest',
+                              '≈ ${_rateText(_loan.annualInterestBasisPoints!)}%',
+                            ),
+                          if (_loan.regularPaymentPaise != null)
+                            _fact(
+                              'Regular instalment',
+                              formatMoney(_loan.regularPaymentPaise!),
+                            ),
+                          if (_loan.installmentCount != null)
+                            _fact(
+                              'Monthly instalments',
+                              '${_loan.installmentCount}',
+                            ),
+                          if (_loan.firstDueDate != null)
+                            _fact(
+                              'First due',
+                              DateFormat.yMMMd().format(_loan.firstDueDate!),
+                            ),
                           _fact(
                             'Started',
                             DateFormat.yMMMd().format(_loan.startDate),
@@ -370,6 +390,46 @@ class _LoanDetailScreenState extends State<LoanDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 24),
+                  if (_payments.isNotEmpty) ...[
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(18),
+                        child: Column(
+                          children: [
+                            _fact(
+                              'Total scheduled',
+                              formatMoney(
+                                _payments.fold<int>(
+                                  0,
+                                  (sum, row) => sum + row.totalPaise,
+                                ),
+                              ),
+                            ),
+                            _fact(
+                              'Principal',
+                              formatMoney(
+                                _payments.fold<int>(
+                                  0,
+                                  (sum, row) => sum + row.principalPaise,
+                                ),
+                              ),
+                            ),
+                            _fact(
+                              'Interest and charges',
+                              formatMoney(
+                                _payments.fold<int>(
+                                  0,
+                                  (sum, row) =>
+                                      sum + row.interestPaise + row.gstPaise,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                  ],
                   Text(
                     'Payment schedule',
                     style: Theme.of(context).textTheme.titleMedium
@@ -388,14 +448,17 @@ class _LoanDetailScreenState extends State<LoanDetailScreen> {
                       ),
                     )
                   else
-                    ..._payments.map(_paymentCard),
+                    ...List.generate(
+                      _payments.length,
+                      (index) => _paymentCard(_payments[index], index + 1),
+                    ),
                 ],
               ),
       ),
     ),
   );
 
-  Widget _paymentCard(LoanTrackingRecord payment) => Padding(
+  Widget _paymentCard(LoanTrackingRecord payment, int number) => Padding(
     padding: const EdgeInsets.only(bottom: 10),
     child: Card(
       child: ListTile(
@@ -405,9 +468,7 @@ class _LoanDetailScreenState extends State<LoanDetailScreen> {
           payment.isPaid ? Icons.check_circle_outline : Icons.schedule_outlined,
         ),
         title: Text(
-          formatMoney(
-            payment.principalPaise + payment.interestPaise + payment.gstPaise,
-          ),
+          'Instalment $number · ${formatMoney(payment.totalPaise)}',
           style: const TextStyle(fontWeight: FontWeight.w700),
         ),
         subtitle: Text(
@@ -453,6 +514,8 @@ class _RecordLoanScreenState extends State<RecordLoanScreen> {
   final _form = GlobalKey<FormState>();
   late final TextEditingController _name;
   late final TextEditingController _amount;
+  late final TextEditingController _regularPayment;
+  late final TextEditingController _installments;
   late final TextEditingController _note;
   late LoanType _type;
   late DateTime _start;
@@ -468,6 +531,14 @@ class _RecordLoanScreenState extends State<RecordLoanScreen> {
     _amount = TextEditingController(
       text: loan == null ? '' : _amountText(loan.totalAmountPaise),
     );
+    _regularPayment = TextEditingController(
+      text: loan?.regularPaymentPaise == null
+          ? ''
+          : _amountText(loan!.regularPaymentPaise!),
+    );
+    _installments = TextEditingController(
+      text: loan?.installmentCount?.toString() ?? '',
+    );
     _note = TextEditingController(text: loan?.note ?? '');
     _type = loan?.type ?? LoanType.emiAmortizing;
     _start = loan?.startDate ?? DateTime(now.year, now.month, now.day);
@@ -478,6 +549,8 @@ class _RecordLoanScreenState extends State<RecordLoanScreen> {
   void dispose() {
     _name.dispose();
     _amount.dispose();
+    _regularPayment.dispose();
+    _installments.dispose();
     _note.dispose();
     super.dispose();
   }
@@ -510,19 +583,45 @@ class _RecordLoanScreenState extends State<RecordLoanScreen> {
     }
     setState(() => _saving = true);
     try {
-      await widget.controller.saveLoan(
-        LoanRecord(
-          id: widget.loan?.id,
-          name: _name.text.trim(),
-          totalAmountPaise: amount,
-          amountPaidPaise: widget.loan?.amountPaidPaise ?? 0,
-          note: _note.text.trim(),
-          startDate: _start,
-          endDate: _end,
-          status: widget.loan?.status ?? LoanStatus.pending,
-          type: _type,
-        ),
+      final creatingSchedule = widget.loan == null;
+      final count = creatingSchedule ? int.parse(_installments.text) : null;
+      final regularPayment = creatingSchedule
+          ? parsePaise(_regularPayment.text)!
+          : null;
+      final rate = creatingSchedule
+          ? estimateAnnualInterestBasisPoints(
+              principalPaise: amount,
+              regularPaymentPaise: regularPayment!,
+              installmentCount: count!,
+            )
+          : null;
+      final end = creatingSchedule ? _loanMonth(_start, count! - 1) : _end;
+      final value = LoanRecord(
+        id: widget.loan?.id,
+        name: _name.text.trim(),
+        totalAmountPaise: amount,
+        amountPaidPaise: widget.loan?.amountPaidPaise ?? 0,
+        note: _note.text.trim(),
+        startDate: _start,
+        endDate: end,
+        status: widget.loan?.status ?? LoanStatus.pending,
+        type: creatingSchedule ? LoanType.emiAmortizing : _type,
+        annualInterestBasisPoints: creatingSchedule
+            ? rate
+            : widget.loan?.annualInterestBasisPoints,
+        regularPaymentPaise: creatingSchedule
+            ? regularPayment
+            : widget.loan?.regularPaymentPaise,
+        installmentCount: creatingSchedule
+            ? count
+            : widget.loan?.installmentCount,
+        firstDueDate: creatingSchedule ? _start : widget.loan?.firstDueDate,
       );
+      if (creatingSchedule) {
+        await widget.controller.saveLoanWithSchedule(value);
+      } else {
+        await widget.controller.saveLoan(value);
+      }
       if (mounted) Navigator.pop(context, true);
     } catch (_) {
       if (!mounted) return;
@@ -576,47 +675,101 @@ class _RecordLoanScreenState extends State<RecordLoanScreen> {
                     : null,
               ),
               const SizedBox(height: 18),
-              DropdownButtonFormField<LoanType>(
-                initialValue: _type,
-                decoration: const InputDecoration(labelText: 'Repayment type'),
-                items: LoanType.values
-                    .map(
-                      (type) => DropdownMenuItem(
-                        value: type,
-                        child: Text(_loanTypeLabel(type)),
-                      ),
-                    )
-                    .toList(),
-                onChanged: _saving
-                    ? null
-                    : (value) => setState(() => _type = value!),
-              ),
-              const SizedBox(height: 8),
-              Text(_loanTypeHelp(_type)),
-              const SizedBox(height: 18),
-              _dateField('Start date', _start, () async {
-                final value = await _choose(_start);
-                if (value != null) setState(() => _start = value);
-              }),
-              const SizedBox(height: 18),
-              _dateField(
-                'Expected end date (optional)',
-                _end,
-                () async {
-                  final value = await _choose(_end ?? _start);
-                  if (value != null) setState(() => _end = value);
-                },
-                clear: _end == null ? null : () => setState(() => _end = null),
-              ),
-              const SizedBox(height: 18),
-              TextFormField(
-                controller: _note,
-                enabled: !_saving,
-                maxLines: 3,
-                decoration: const InputDecoration(
-                  labelText: 'Account, rate, or note (optional)',
+              if (widget.loan == null) ...[
+                TextFormField(
+                  controller: _regularPayment,
+                  enabled: !_saving,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  decoration: const InputDecoration(
+                    labelText: 'Regular monthly instalment',
+                    prefixText: '₹ ',
+                  ),
+                  validator: (value) {
+                    final payment = parsePaise(value ?? '');
+                    final amount = parsePaise(_amount.text);
+                    final count = int.tryParse(_installments.text.trim());
+                    if (payment == null) return 'Enter a payment amount';
+                    if (amount != null &&
+                        count != null &&
+                        payment * count < amount) {
+                      return 'Payments do not cover the financed amount';
+                    }
+                    return null;
+                  },
                 ),
-              ),
+                const SizedBox(height: 18),
+                TextFormField(
+                  controller: _installments,
+                  enabled: !_saving,
+                  keyboardType: TextInputType.number,
+                  decoration: const InputDecoration(
+                    labelText: 'Number of monthly instalments',
+                  ),
+                  validator: (value) {
+                    final count = int.tryParse((value ?? '').trim());
+                    return count == null || count < 1 || count > 600
+                        ? 'Enter 1 to 600 instalments'
+                        : null;
+                  },
+                ),
+                const SizedBox(height: 18),
+                _dateField('First due date', _start, () async {
+                  final value = await _choose(_start);
+                  if (value != null) setState(() => _start = value);
+                }),
+                const SizedBox(height: 8),
+                const Text(
+                  'Monthly frequency, interest rate, and reducing-balance split are derived automatically.',
+                ),
+              ] else ...[
+                DropdownButtonFormField<LoanType>(
+                  initialValue: _type,
+                  decoration: const InputDecoration(
+                    labelText: 'Repayment type',
+                  ),
+                  items: LoanType.values
+                      .map(
+                        (type) => DropdownMenuItem(
+                          value: type,
+                          child: Text(_loanTypeLabel(type)),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: _saving
+                      ? null
+                      : (value) => setState(() => _type = value!),
+                ),
+                const SizedBox(height: 8),
+                Text(_loanTypeHelp(_type)),
+                const SizedBox(height: 18),
+                _dateField('Start date', _start, () async {
+                  final value = await _choose(_start);
+                  if (value != null) setState(() => _start = value);
+                }),
+                const SizedBox(height: 18),
+                _dateField(
+                  'Expected end date (optional)',
+                  _end,
+                  () async {
+                    final value = await _choose(_end ?? _start);
+                    if (value != null) setState(() => _end = value);
+                  },
+                  clear: _end == null
+                      ? null
+                      : () => setState(() => _end = null),
+                ),
+                const SizedBox(height: 18),
+                TextFormField(
+                  controller: _note,
+                  enabled: !_saving,
+                  maxLines: 3,
+                  decoration: const InputDecoration(
+                    labelText: 'Account, rate, or note (optional)',
+                  ),
+                ),
+              ],
               const SizedBox(height: 28),
               FilledButton.icon(
                 onPressed: _saving ? null : _save,
@@ -882,3 +1035,16 @@ int? _parseNonNegativePaise(String value) {
 
 String _amountText(int paise) =>
     '${paise ~/ 100}.${(paise % 100).toString().padLeft(2, '0')}';
+
+String _rateText(int basisPoints) {
+  final value = basisPoints / 100;
+  return value == value.roundToDouble()
+      ? value.toStringAsFixed(0)
+      : value.toStringAsFixed(2).replaceFirst(RegExp(r'0+$'), '');
+}
+
+DateTime _loanMonth(DateTime date, int months) {
+  final target = DateTime(date.year, date.month + months, 1);
+  final lastDay = DateTime(target.year, target.month + 1, 0).day;
+  return DateTime(target.year, target.month, date.day.clamp(1, lastDay));
+}

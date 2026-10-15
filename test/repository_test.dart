@@ -6,6 +6,8 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:yenma/data/money_repository.dart';
 import 'package:yenma/domain/money.dart';
 import 'package:yenma/domain/monthly_plan.dart';
+import 'package:yenma/domain/import_foundation.dart';
+import 'package:yenma/domain/statement_import.dart';
 
 void main() {
   sqfliteFfiInit();
@@ -86,6 +88,177 @@ void main() {
     expect(saved.instrumentLast4, '4321');
     expect(saved.importRole, ImportedTransactionRole.cardPurchase);
     expect(saved.instrumentLabel, 'HDFC Bank •4321');
+  });
+
+  test(
+    'import foundation retains inbox outcomes, accounts, provenance and cursor',
+    () async {
+      MoneyTransaction imported(String externalId) => MoneyTransaction(
+        title: 'Corner Cafe',
+        amountPaise: 12550,
+        kind: TransactionKind.expense,
+        categoryId: 13,
+        date: DateTime(2026, 10, 15, 12, 30),
+        source: 'SMS',
+        bankName: 'HDFC Bank',
+        instrumentType: FinancialInstrumentType.bankAccount,
+        instrumentLast4: '1234',
+        importRole: ImportedTransactionRole.accountDebit,
+        externalId: externalId,
+      );
+
+      final first = await repository.importRecords([
+        ImportRecord(
+          source: 'sms',
+          sourceItemId: 'message-1',
+          rawPayload: 'HDFC\nINR 125.50 debited at Corner Cafe',
+          receivedAt: DateTime(2026, 10, 15, 12, 31),
+          transaction: imported('external-1'),
+        ),
+        ImportRecord(
+          source: 'sms',
+          sourceItemId: 'unsupported-1',
+          rawPayload: 'HDFC\nYour statement is ready',
+          receivedAt: DateTime(2026, 10, 15, 12, 32),
+          rejectionReason: 'unsupported_message',
+        ),
+      ]);
+      final duplicate = await repository.importRecords([
+        ImportRecord(
+          source: 'sms',
+          sourceItemId: 'message-2',
+          rawPayload: 'HDFC\nINR 125.50 debited at Corner Cafe',
+          receivedAt: DateTime(2026, 10, 15, 12, 35),
+          transaction: imported('external-2'),
+        ),
+      ]);
+      final cursor = DateTime(2026, 10, 16, 8);
+      await repository.saveImportCursor('sms', cursor);
+
+      expect(first.imported, 1);
+      expect(first.rejected, 1);
+      expect(duplicate.duplicates, 1);
+      expect(await repository.financialAccounts(), hasLength(1));
+      expect(
+        (await repository.importInbox()).map((item) => item.status),
+        containsAll([
+          ImportInboxStatus.imported,
+          ImportInboxStatus.rejected,
+          ImportInboxStatus.duplicate,
+        ]),
+      );
+      expect(await repository.transactions(DateTime(2026, 10)), hasLength(1));
+
+      await repository.close();
+      await repository.initialize();
+      expect(await repository.importCursor('sms'), cursor);
+      expect(await repository.importInbox(), hasLength(3));
+    },
+  );
+
+  test(
+    'matching account debit and card payment produce a suggestion',
+    () async {
+      final result = await repository.importRecords([
+        ImportRecord(
+          source: 'sms',
+          sourceItemId: 'account-side',
+          rawPayload: 'Account debit for card bill',
+          receivedAt: DateTime(2026, 10, 10),
+          transaction: MoneyTransaction(
+            title: 'Card bill',
+            amountPaise: 485600,
+            kind: TransactionKind.expense,
+            categoryId: 13,
+            date: DateTime(2026, 10, 10),
+            source: 'SMS',
+            bankName: 'HDFC Bank',
+            instrumentType: FinancialInstrumentType.bankAccount,
+            instrumentLast4: '1234',
+            importRole: ImportedTransactionRole.accountDebit,
+            externalId: 'account-external',
+          ),
+        ),
+        ImportRecord(
+          source: 'sms',
+          sourceItemId: 'card-side',
+          rawPayload: 'Card payment received',
+          receivedAt: DateTime(2026, 10, 11),
+          transaction: MoneyTransaction(
+            title: 'Credit card payment',
+            amountPaise: 485600,
+            kind: TransactionKind.transfer,
+            categoryId: 12,
+            date: DateTime(2026, 10, 11),
+            source: 'SMS',
+            bankName: 'HDFC Credit Card',
+            instrumentType: FinancialInstrumentType.creditCard,
+            instrumentLast4: '4321',
+            importRole: ImportedTransactionRole.cardPayment,
+            externalId: 'card-external',
+          ),
+        ),
+      ]);
+
+      expect(result.reconciliationSuggestions, 1);
+      final suggestion = (await repository.importReconciliations()).single;
+      expect(suggestion.amountPaise, 485600);
+      expect(suggestion.dateDistanceDays, 1);
+      expect(suggestion.status, ReconciliationStatus.suggested);
+      // Foundation only proposes the link; it does not silently edit the debit.
+      expect(
+        (await repository.transactions(DateTime(2026, 10)))
+            .singleWhere(
+              (item) => item.importRole == ImportedTransactionRole.accountDebit,
+            )
+            .kind,
+        TransactionKind.expense,
+      );
+    },
+  );
+
+  test('statement import profiles persist and can be updated', () async {
+    const profile = StatementImportProfile(
+      name: 'Canara savings',
+      sourceKey: 'canara-savings-1234',
+      format: StatementFileFormat.csv,
+      columns: {
+        StatementField.sourceRecordId: 'Transaction ID',
+        StatementField.transactionDate: 'Date',
+        StatementField.description: 'Narration',
+        StatementField.debitAmount: 'Debit',
+        StatementField.creditAmount: 'Credit',
+      },
+      defaults: {
+        StatementField.institution: 'Canara Bank',
+        StatementField.instrumentType: 'Bank Account',
+        StatementField.instrumentLast4: '1234',
+        StatementField.currency: 'INR',
+      },
+    );
+    final id = await repository.saveStatementImportProfile(profile);
+    final saved = (await repository.statementImportProfiles()).single;
+    expect(saved.id, id);
+    expect(saved.columns[StatementField.debitAmount], 'Debit');
+
+    await repository.saveStatementImportProfile(
+      StatementImportProfile(
+        id: id,
+        name: saved.name,
+        sourceKey: saved.sourceKey,
+        format: saved.format,
+        columns: saved.columns,
+        defaults: saved.defaults,
+        sheetName: 'Statement',
+        headerRow: 5,
+      ),
+    );
+    await repository.close();
+    await repository.initialize();
+
+    final updated = (await repository.statementImportProfiles()).single;
+    expect(updated.sheetName, 'Statement');
+    expect(updated.headerRow, 5);
   });
 
   test(

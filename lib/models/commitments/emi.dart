@@ -30,6 +30,12 @@ class EmiRecord {
   int get remainingPaise =>
       (principalPaise - paidPrincipalPaise).clamp(0, principalPaise);
   bool get isComplete => remainingPaise == 0;
+
+  /// The complete cost represented by the supplied schedule, including the
+  /// one-time processing fee exactly once.
+  int totalRepaymentPaise(Iterable<EmiInstallment> installments) =>
+      processingFeePaise +
+      installments.fold<int>(0, (total, item) => total + item.totalPaise);
 }
 
 /// One calculated or recorded installment belonging to an EMI.

@@ -73,9 +73,24 @@ void main() {
       expect(await repository.emiInstallments(emis.first.id!), isNotEmpty);
 
       final loans = await repository.loans();
-      expect(loans, hasLength(3));
+      expect(loans, hasLength(4));
       expect(loans.where((loan) => loan.isComplete), hasLength(1));
       expect(await repository.loanPayments(loans.first.id!), isNotEmpty);
+      final reportLoan = loans.singleWhere(
+        (loan) => loan.name == 'Personal loan · Report example',
+      );
+      final reportSchedule = await repository.loanPayments(reportLoan.id!);
+      expect(reportSchedule, hasLength(48));
+      expect(
+        reportSchedule.fold<int>(0, (sum, row) => sum + row.principalPaise),
+        43000000,
+      );
+      expect(
+        reportSchedule.fold<int>(0, (sum, row) => sum + row.interestPaise),
+        11686800,
+      );
+      expect(reportSchedule.first.totalPaise, 1365700);
+      expect(reportSchedule.last.totalPaise, 1134100);
 
       final groups = await repository.splitGroups();
       expect(groups, hasLength(2));
@@ -103,6 +118,36 @@ void main() {
     },
   );
 
+  test(
+    'preview EMI schedule includes the processing fee exactly once',
+    () async {
+      final today = DateTime(2026, 10, 3);
+
+      await preview.seedPreviewData(repository, today: today);
+
+      final laptopEmi = (await repository.emis()).singleWhere(
+        (emi) => emi.name == 'Laptop EMI',
+      );
+      final schedule = await repository.emiInstallments(laptopEmi.id!);
+
+      expect(schedule, hasLength(12));
+      expect(
+        schedule.fold<int>(
+          0,
+          (total, installment) => total + installment.principalPaise,
+        ),
+        laptopEmi.principalPaise,
+      );
+      expect(schedule.where((installment) => installment.isPaid), hasLength(4));
+      expect(
+        schedule.where((installment) => !installment.isPaid),
+        hasLength(8),
+      );
+      expect(laptopEmi.processingFeePaise, 29900);
+      expect(laptopEmi.totalRepaymentPaise(schedule), 9029900);
+    },
+  );
+
   test('preview seed is idempotent', () async {
     final today = DateTime(2026, 10, 3);
 
@@ -117,7 +162,7 @@ void main() {
     expect(await repository.plansForMonth(today), hasLength(4));
     expect(await repository.subscriptions(), hasLength(5));
     expect(await repository.emis(), hasLength(2));
-    expect(await repository.loans(), hasLength(3));
+    expect(await repository.loans(), hasLength(4));
     expect(await repository.splitGroups(), hasLength(2));
     expect(await repository.debts(), hasLength(7));
   });

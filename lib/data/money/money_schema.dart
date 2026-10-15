@@ -11,7 +11,90 @@ Future<void> createMoneySchema(DatabaseExecutor db) async {
   await createTransactionReceiptChunksTable(db);
   await createSmsSyncLogTable(db);
   await createMonthlyPlansTable(db);
+  await createImportFoundationSchema(db);
+  await createStatementImportProfilesTable(db);
   await seedDefaultCategories(db);
+}
+
+Future<void> createStatementImportProfilesTable(DatabaseExecutor db) =>
+    db.execute('''CREATE TABLE IF NOT EXISTS statement_import_profiles (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      source_key TEXT NOT NULL UNIQUE,
+      file_format TEXT NOT NULL CHECK(file_format IN ('csv','xlsx')),
+      sheet_name TEXT,
+      header_row INTEGER NOT NULL CHECK(header_row >= 0),
+      columns_json TEXT NOT NULL,
+      defaults_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )''');
+
+/// Creates the durable staging, provenance, cursor, and reconciliation layer
+/// used by all transaction import sources.
+Future<void> createImportFoundationSchema(DatabaseExecutor db) async {
+  await db.execute('''CREATE TABLE IF NOT EXISTS financial_accounts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    institution TEXT NOT NULL,
+    instrument_type TEXT NOT NULL CHECK(instrument_type IN ('bankAccount','creditCard')),
+    instrument_last4 TEXT,
+    display_name TEXT NOT NULL,
+    UNIQUE(institution, instrument_type, instrument_last4)
+  )''');
+  await db.execute(
+    "CREATE UNIQUE INDEX IF NOT EXISTS financial_accounts_identity ON financial_accounts(institution, instrument_type, IFNULL(instrument_last4, ''))",
+  );
+  await db.execute('''CREATE TABLE IF NOT EXISTS import_inbox (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    source_item_id TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    raw_payload TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('imported','duplicate','rejected')),
+    reason TEXT,
+    transaction_id INTEGER REFERENCES transactions(id) ON DELETE SET NULL,
+    account_id INTEGER REFERENCES financial_accounts(id) ON DELETE SET NULL,
+    UNIQUE(source, source_item_id)
+  )''');
+  await db.execute(
+    'CREATE INDEX IF NOT EXISTS import_inbox_payload_hash ON import_inbox(source, payload_hash)',
+  );
+  await db.execute('''CREATE TABLE IF NOT EXISTS transaction_provenance (
+    transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    inbox_id INTEGER NOT NULL UNIQUE REFERENCES import_inbox(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    source_item_id TEXT NOT NULL,
+    PRIMARY KEY(transaction_id, inbox_id)
+  )''');
+  await db.execute('''CREATE TABLE IF NOT EXISTS import_cursors (
+    source TEXT PRIMARY KEY,
+    covered_through TEXT NOT NULL
+  )''');
+  await db.execute('''CREATE TABLE IF NOT EXISTS import_reconciliations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    account_debit_transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    card_payment_transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'suggested' CHECK(status IN ('suggested','confirmed','dismissed')),
+    amount_paise INTEGER NOT NULL,
+    date_distance_days INTEGER NOT NULL,
+    UNIQUE(account_debit_transaction_id, card_payment_transaction_id)
+  )''');
+  await db.execute('''CREATE TABLE IF NOT EXISTS import_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    completed_at TEXT NOT NULL,
+    from_at TEXT NOT NULL,
+    until_at TEXT NOT NULL,
+    automatic INTEGER NOT NULL CHECK(automatic IN (0,1)),
+    scanned INTEGER NOT NULL,
+    parsed INTEGER NOT NULL,
+    imported INTEGER NOT NULL,
+    duplicates INTEGER NOT NULL,
+    rejected INTEGER NOT NULL,
+    reconciliation_suggestions INTEGER NOT NULL,
+    error_code TEXT
+  )''');
 }
 
 /// Adds a column safely when upgrading databases created by older versions.

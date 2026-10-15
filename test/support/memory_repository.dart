@@ -4,6 +4,8 @@ import 'package:yenma/domain/money.dart';
 import 'package:yenma/domain/debt.dart';
 import 'package:yenma/domain/monthly_plan.dart';
 import 'package:yenma/domain/split.dart';
+import 'package:yenma/domain/import_foundation.dart';
+import 'package:yenma/domain/statement_import.dart';
 
 import 'dart:typed_data';
 
@@ -14,6 +16,12 @@ class MemoryRepository implements MoneyRepository {
       _people.values.toList()
         ..sort((a, b) => personNameKey(a).compareTo(personNameKey(b)));
   final List<MoneyTransaction> entries = [];
+  final List<ImportInboxItem> inboxItems = [];
+  final List<FinancialAccount> importedAccounts = [];
+  final List<ImportReconciliation> reconciliationItems = [];
+  final Map<String, DateTime> importCursors = {};
+  final List<ImportRunDiagnostic> importRuns = [];
+  final List<StatementImportProfile> savedStatementProfiles = [];
   final List<MoneyPlan> moneyPlans = [];
   final List<PlanType> savedPlanTypes = [];
   final List<SubscriptionRecord> savedSubscriptions = [];
@@ -189,9 +197,41 @@ class MemoryRepository implements MoneyRepository {
           ? LoanStatus.fullyPaid
           : LoanStatus.pending,
       type: value.type,
+      annualInterestBasisPoints: value.annualInterestBasisPoints,
+      regularPaymentPaise: value.regularPaymentPaise,
+      installmentCount: value.installmentCount,
+      firstDueDate: value.firstDueDate,
     );
     savedLoans.removeWhere((item) => item.id == id);
     savedLoans.add(saved);
+    return id;
+  }
+
+  @override
+  Future<int> saveLoanWithSchedule(LoanRecord value) async {
+    if (failSave) throw StateError('Disk full');
+    if (value.id != null || !value.hasGeneratedSchedule) {
+      throw ArgumentError('A new fixed monthly loan is required');
+    }
+    final id = await saveLoan(value);
+    savedLoanPayments.addAll(
+      generateMonthlyLoanSchedule(
+        loanId: id,
+        principalPaise: value.totalAmountPaise,
+        annualInterestBasisPoints: value.annualInterestBasisPoints!,
+        installmentCount: value.installmentCount!,
+        firstDueDate: value.firstDueDate!,
+        regularPaymentPaise: value.regularPaymentPaise,
+      ).map(
+        (payment) => LoanTrackingRecord(
+          id: ++_id,
+          loanId: payment.loanId,
+          principalPaise: payment.principalPaise,
+          interestPaise: payment.interestPaise,
+          date: payment.date,
+        ),
+      ),
+    );
     return id;
   }
 
@@ -205,7 +245,7 @@ class MemoryRepository implements MoneyRepository {
   @override
   Future<List<LoanTrackingRecord>> loanPayments(int loanId) async =>
       savedLoanPayments.where((item) => item.loanId == loanId).toList()
-        ..sort((a, b) => b.date.compareTo(a.date));
+        ..sort((a, b) => a.date.compareTo(b.date));
 
   @override
   Future<void> saveLoanPayment(LoanTrackingRecord value) async {
@@ -255,6 +295,10 @@ class MemoryRepository implements MoneyRepository {
           ? LoanStatus.fullyPaid
           : LoanStatus.pending,
       type: loan.type,
+      annualInterestBasisPoints: loan.annualInterestBasisPoints,
+      regularPaymentPaise: loan.regularPaymentPaise,
+      installmentCount: loan.installmentCount,
+      firstDueDate: loan.firstDueDate,
     );
   }
 
@@ -409,6 +453,130 @@ class MemoryRepository implements MoneyRepository {
       count++;
     }
     return count;
+  }
+
+  @override
+  Future<ImportBatchResult> importRecords(List<ImportRecord> records) async {
+    var parsed = 0;
+    var imported = 0;
+    var duplicates = 0;
+    var rejected = 0;
+    for (final record in records) {
+      final transaction = record.transaction;
+      if (transaction != null) parsed++;
+      if (inboxItems.any(
+        (item) =>
+            item.source == record.source &&
+            item.sourceItemId == record.sourceItemId,
+      )) {
+        duplicates++;
+        continue;
+      }
+      if (transaction == null) {
+        rejected++;
+        inboxItems.add(
+          ImportInboxItem(
+            id: inboxItems.length + 1,
+            source: record.source,
+            sourceItemId: record.sourceItemId,
+            receivedAt: record.receivedAt,
+            status: ImportInboxStatus.rejected,
+            reason: record.rejectionReason ?? 'unsupported_message',
+          ),
+        );
+        continue;
+      }
+      final existing =
+          transaction.externalId != null &&
+          entries.any((item) => item.externalId == transaction.externalId);
+      if (existing) {
+        duplicates++;
+        inboxItems.add(
+          ImportInboxItem(
+            id: inboxItems.length + 1,
+            source: record.source,
+            sourceItemId: record.sourceItemId,
+            receivedAt: record.receivedAt,
+            status: ImportInboxStatus.duplicate,
+            reason: 'same_external_id',
+          ),
+        );
+        continue;
+      }
+      await save(transaction);
+      imported++;
+      inboxItems.add(
+        ImportInboxItem(
+          id: inboxItems.length + 1,
+          source: record.source,
+          sourceItemId: record.sourceItemId,
+          receivedAt: record.receivedAt,
+          status: ImportInboxStatus.imported,
+          transactionId: entries.last.id,
+        ),
+      );
+    }
+    return ImportBatchResult(
+      scanned: records.length,
+      parsed: parsed,
+      imported: imported,
+      duplicates: duplicates,
+      rejected: rejected,
+      reconciliationSuggestions: 0,
+    );
+  }
+
+  @override
+  Future<List<FinancialAccount>> financialAccounts() async =>
+      List.of(importedAccounts);
+
+  @override
+  Future<List<ImportInboxItem>> importInbox({int limit = 100}) async =>
+      inboxItems.reversed.take(limit).toList();
+
+  @override
+  Future<List<ImportReconciliation>> importReconciliations() async =>
+      List.of(reconciliationItems);
+
+  @override
+  Future<DateTime?> importCursor(String source) async => importCursors[source];
+
+  @override
+  Future<void> saveImportCursor(String source, DateTime coveredThrough) async {
+    importCursors[source] = coveredThrough;
+  }
+
+  @override
+  Future<void> recordImportRun(ImportRunDiagnostic diagnostic) async {
+    importRuns.add(diagnostic);
+  }
+
+  @override
+  Future<List<StatementImportProfile>> statementImportProfiles() async =>
+      List.of(savedStatementProfiles);
+
+  @override
+  Future<int> saveStatementImportProfile(StatementImportProfile profile) async {
+    final id = profile.id ?? savedStatementProfiles.length + 1;
+    savedStatementProfiles.removeWhere((item) => item.id == id);
+    savedStatementProfiles.add(
+      StatementImportProfile(
+        id: id,
+        name: profile.name,
+        sourceKey: profile.sourceKey,
+        format: profile.format,
+        columns: profile.columns,
+        defaults: profile.defaults,
+        sheetName: profile.sheetName,
+        headerRow: profile.headerRow,
+      ),
+    );
+    return id;
+  }
+
+  @override
+  Future<void> deleteStatementImportProfile(int id) async {
+    savedStatementProfiles.removeWhere((item) => item.id == id);
   }
 
   final Map<String, int> _recipientCategories = {};

@@ -1,11 +1,15 @@
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
+import 'dart:convert';
+
 import 'dart:typed_data';
 
 import '../domain/money.dart';
 import '../domain/debt.dart';
 import '../domain/monthly_plan.dart';
+import '../domain/import_foundation.dart';
+import '../domain/statement_import.dart';
 import 'application_support_data.dart';
 import 'commitments_data.dart';
 import 'debt_repository.dart';
@@ -17,6 +21,38 @@ import 'splitting_data.dart';
 import 'yenma_schema.dart';
 
 export 'money/money_repository_contract.dart';
+
+String _stablePayloadHash(String value) {
+  // FNV-1a is used as a deterministic local deduplication key. It is not a
+  // security boundary and the original payload remains available for audit.
+  var hash = 0xcbf29ce484222325;
+  for (final byte in value.codeUnits) {
+    hash ^= byte;
+    hash = (hash * 0x100000001b3) & 0x7fffffffffffffff;
+  }
+  return hash.toRadixString(16).padLeft(16, '0');
+}
+
+StatementImportProfile _statementProfileFromRow(Map<String, Object?> row) {
+  Map<StatementField, String> fields(String value) {
+    final decoded = Map<String, dynamic>.from(jsonDecode(value) as Map);
+    return {
+      for (final entry in decoded.entries)
+        StatementField.values.byName(entry.key): entry.value as String,
+    };
+  }
+
+  return StatementImportProfile(
+    id: row['id'] as int,
+    name: row['name'] as String,
+    sourceKey: row['source_key'] as String,
+    format: StatementFileFormat.values.byName(row['file_format'] as String),
+    sheetName: row['sheet_name'] as String?,
+    headerRow: row['header_row'] as int,
+    columns: fields(row['columns_json'] as String),
+    defaults: fields(row['defaults_json'] as String),
+  );
+}
 
 /// Main SQLite repository that composes all feature-specific data operations.
 class SqliteMoneyRepository
@@ -41,7 +77,7 @@ class SqliteMoneyRepository
     _database = await _factory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 16,
+        version: 19,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: (db, version) async {
           await createMoneySchema(db);
@@ -186,6 +222,29 @@ class SqliteMoneyRepository
               );
             }
           }
+          if (oldVersion < 17) await createImportFoundationSchema(db);
+          if (oldVersion < 18) await createStatementImportProfilesTable(db);
+          if (oldVersion < 19) {
+            await addColumnIfMissing(
+              db,
+              'loans',
+              'annual_interest_basis_points',
+              'INTEGER CHECK(annual_interest_basis_points >= 0)',
+            );
+            await addColumnIfMissing(
+              db,
+              'loans',
+              'regular_payment_paise',
+              'INTEGER CHECK(regular_payment_paise > 0)',
+            );
+            await addColumnIfMissing(
+              db,
+              'loans',
+              'installment_count',
+              'INTEGER CHECK(installment_count > 0)',
+            );
+            await addColumnIfMissing(db, 'loans', 'first_due_date', 'TEXT');
+          }
         },
       ),
     );
@@ -208,6 +267,10 @@ class SqliteMoneyRepository
 
   @override
   Future<int> saveLoan(LoanRecord value) => commitments.saveLoan(value);
+
+  @override
+  Future<int> saveLoanWithSchedule(LoanRecord value) =>
+      commitments.saveLoanWithSchedule(value);
 
   @override
   Future<List<LoanRecord>> loans() => commitments.loans();
@@ -380,6 +443,348 @@ class SqliteMoneyRepository
     });
     return imported;
   }
+
+  @override
+  Future<ImportBatchResult> importRecords(List<ImportRecord> records) async {
+    var parsed = 0;
+    var imported = 0;
+    var duplicates = 0;
+    var rejected = 0;
+    var suggestions = 0;
+    await _db.transaction((db) async {
+      for (final record in records) {
+        final transaction = record.transaction;
+        if (transaction != null) parsed++;
+        final sameSourceItem = await db.query(
+          'import_inbox',
+          columns: ['id'],
+          where: 'source = ? AND source_item_id = ?',
+          whereArgs: [record.source, record.sourceItemId],
+          limit: 1,
+        );
+        if (sameSourceItem.isNotEmpty) {
+          duplicates++;
+          continue;
+        }
+
+        final payloadHash = _stablePayloadHash(record.rawPayload);
+        final samePayload = await db.query(
+          'import_inbox',
+          columns: ['id'],
+          where: 'source = ? AND payload_hash = ? AND raw_payload = ?',
+          whereArgs: [record.source, payloadHash, record.rawPayload],
+          limit: 1,
+        );
+        if (samePayload.isNotEmpty) {
+          await _insertInbox(
+            db,
+            record,
+            payloadHash,
+            ImportInboxStatus.duplicate,
+            reason: 'same_payload',
+          );
+          duplicates++;
+          continue;
+        }
+        if (transaction == null) {
+          await _insertInbox(
+            db,
+            record,
+            payloadHash,
+            ImportInboxStatus.rejected,
+            reason: record.rejectionReason ?? 'unsupported_message',
+          );
+          rejected++;
+          continue;
+        }
+        if (transaction.externalId != null) {
+          final existingTransaction = await db.query(
+            'transactions',
+            columns: ['id'],
+            where: 'external_id = ?',
+            whereArgs: [transaction.externalId],
+            limit: 1,
+          );
+          if (existingTransaction.isNotEmpty) {
+            await _insertInbox(
+              db,
+              record,
+              payloadHash,
+              ImportInboxStatus.duplicate,
+              reason: 'same_external_id',
+              transactionId: existingTransaction.single['id'] as int,
+            );
+            duplicates++;
+            continue;
+          }
+        }
+
+        final accountId = await _upsertFinancialAccount(db, transaction);
+        final inboxId = await _insertInbox(
+          db,
+          record,
+          payloadHash,
+          ImportInboxStatus.imported,
+          accountId: accountId,
+        );
+        final transactionId = await writeTransaction(db, transaction);
+        await db.update(
+          'import_inbox',
+          {'transaction_id': transactionId},
+          where: 'id = ?',
+          whereArgs: [inboxId],
+        );
+        await db.insert('transaction_provenance', {
+          'transaction_id': transactionId,
+          'inbox_id': inboxId,
+          'source': record.source,
+          'source_item_id': record.sourceItemId,
+        });
+        imported++;
+        suggestions += await _suggestReconciliations(
+          db,
+          transactionId,
+          transaction,
+        );
+      }
+    });
+    return ImportBatchResult(
+      scanned: records.length,
+      parsed: parsed,
+      imported: imported,
+      duplicates: duplicates,
+      rejected: rejected,
+      reconciliationSuggestions: suggestions,
+    );
+  }
+
+  Future<int> _insertInbox(
+    DatabaseExecutor db,
+    ImportRecord record,
+    String payloadHash,
+    ImportInboxStatus status, {
+    String? reason,
+    int? transactionId,
+    int? accountId,
+  }) => db.insert('import_inbox', {
+    'source': record.source,
+    'source_item_id': record.sourceItemId,
+    'payload_hash': payloadHash,
+    'raw_payload': record.rawPayload,
+    'received_at': record.receivedAt.toIso8601String(),
+    'status': status.name,
+    'reason': reason,
+    'transaction_id': transactionId,
+    'account_id': accountId,
+  });
+
+  Future<int?> _upsertFinancialAccount(
+    DatabaseExecutor db,
+    MoneyTransaction transaction,
+  ) async {
+    final institution = transaction.bankName?.trim();
+    final type = transaction.instrumentType;
+    if (institution == null || institution.isEmpty || type == null) return null;
+    final rows = await db.query(
+      'financial_accounts',
+      columns: ['id'],
+      where: "institution = ? AND instrument_type = ? AND IFNULL(instrument_last4, '') = ?",
+      whereArgs: [institution, type.name, transaction.instrumentLast4 ?? ''],
+      limit: 1,
+    );
+    if (rows.isNotEmpty) return rows.single['id'] as int;
+    return db.insert('financial_accounts', {
+      'institution': institution,
+      'instrument_type': type.name,
+      'instrument_last4': transaction.instrumentLast4,
+      'display_name': transaction.instrumentLabel,
+    });
+  }
+
+  Future<int> _suggestReconciliations(
+    DatabaseExecutor db,
+    int transactionId,
+    MoneyTransaction transaction,
+  ) async {
+    final role = transaction.importRole;
+    if (role != ImportedTransactionRole.accountDebit &&
+        role != ImportedTransactionRole.cardPayment) {
+      return 0;
+    }
+    final counterpart = role == ImportedTransactionRole.accountDebit
+        ? ImportedTransactionRole.cardPayment
+        : ImportedTransactionRole.accountDebit;
+    final candidates = await db.query(
+      'transactions',
+      columns: ['id', 'date'],
+      where: 'id != ? AND import_role = ? AND amount_paise = ?',
+      whereArgs: [transactionId, counterpart.name, transaction.amountPaise],
+    );
+    var count = 0;
+    for (final candidate in candidates) {
+      final candidateDate = parseTransactionDate(candidate['date'] as String);
+      final distance = calendarDate(candidateDate)
+          .difference(calendarDate(transaction.date))
+          .inDays
+          .abs();
+      if (distance > 3) continue;
+      final candidateId = candidate['id'] as int;
+      final debitId = role == ImportedTransactionRole.accountDebit
+          ? transactionId
+          : candidateId;
+      final paymentId = role == ImportedTransactionRole.cardPayment
+          ? transactionId
+          : candidateId;
+      final inserted = await db.insert('import_reconciliations', {
+        'account_debit_transaction_id': debitId,
+        'card_payment_transaction_id': paymentId,
+        'status': ReconciliationStatus.suggested.name,
+        'amount_paise': transaction.amountPaise,
+        'date_distance_days': distance,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      if (inserted != 0) count++;
+    }
+    return count;
+  }
+
+  @override
+  Future<List<FinancialAccount>> financialAccounts() async =>
+      (await _db.query('financial_accounts', orderBy: 'display_name ASC'))
+          .map(
+            (row) => FinancialAccount(
+              id: row['id'] as int,
+              institution: row['institution'] as String,
+              type: FinancialInstrumentType.values.byName(
+                row['instrument_type'] as String,
+              ),
+              last4: row['instrument_last4'] as String?,
+              displayName: row['display_name'] as String,
+            ),
+          )
+          .toList();
+
+  @override
+  Future<List<ImportInboxItem>> importInbox({int limit = 100}) async =>
+      (await _db.query('import_inbox', orderBy: 'id DESC', limit: limit))
+          .map(
+            (row) => ImportInboxItem(
+              id: row['id'] as int,
+              source: row['source'] as String,
+              sourceItemId: row['source_item_id'] as String,
+              receivedAt: DateTime.parse(row['received_at'] as String),
+              status: ImportInboxStatus.values.byName(row['status'] as String),
+              reason: row['reason'] as String?,
+              transactionId: row['transaction_id'] as int?,
+              accountId: row['account_id'] as int?,
+            ),
+          )
+          .toList();
+
+  @override
+  Future<List<ImportReconciliation>> importReconciliations() async =>
+      (await _db.query('import_reconciliations', orderBy: 'id DESC'))
+          .map(
+            (row) => ImportReconciliation(
+              id: row['id'] as int,
+              accountDebitTransactionId:
+                  row['account_debit_transaction_id'] as int,
+              cardPaymentTransactionId:
+                  row['card_payment_transaction_id'] as int,
+              status: ReconciliationStatus.values.byName(
+                row['status'] as String,
+              ),
+              amountPaise: row['amount_paise'] as int,
+              dateDistanceDays: row['date_distance_days'] as int,
+            ),
+          )
+          .toList();
+
+  @override
+  Future<DateTime?> importCursor(String source) async {
+    final rows = await _db.query(
+      'import_cursors',
+      where: 'source = ?',
+      whereArgs: [source],
+      limit: 1,
+    );
+    return rows.isEmpty
+        ? null
+        : DateTime.parse(rows.single['covered_through'] as String);
+  }
+
+  @override
+  Future<void> saveImportCursor(String source, DateTime coveredThrough) =>
+      _db.insert('import_cursors', {
+        'source': source,
+        'covered_through': coveredThrough.toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+  @override
+  Future<void> recordImportRun(ImportRunDiagnostic diagnostic) => _db.insert(
+    'import_runs',
+    {
+      'source': diagnostic.source,
+      'started_at': diagnostic.startedAt.toIso8601String(),
+      'completed_at': diagnostic.completedAt.toIso8601String(),
+      'from_at': diagnostic.from.toIso8601String(),
+      'until_at': diagnostic.until.toIso8601String(),
+      'automatic': diagnostic.automatic ? 1 : 0,
+      'scanned': diagnostic.result.scanned,
+      'parsed': diagnostic.result.parsed,
+      'imported': diagnostic.result.imported,
+      'duplicates': diagnostic.result.duplicates,
+      'rejected': diagnostic.result.rejected,
+      'reconciliation_suggestions': diagnostic.result.reconciliationSuggestions,
+      'error_code': diagnostic.errorCode,
+    },
+  );
+
+  @override
+  Future<List<StatementImportProfile>> statementImportProfiles() async =>
+      (await _db.query(
+        'statement_import_profiles',
+        orderBy: 'name ASC',
+      )).map(_statementProfileFromRow).toList();
+
+  @override
+  Future<int> saveStatementImportProfile(StatementImportProfile profile) async {
+    if (profile.name.trim().isEmpty ||
+        profile.sourceKey.trim().isEmpty ||
+        profile.headerRow < 0) {
+      throw ArgumentError('Invalid statement import profile.');
+    }
+    final row = {
+      'name': profile.name.trim(),
+      'source_key': profile.sourceKey.trim(),
+      'file_format': profile.format.name,
+      'sheet_name': profile.sheetName?.trim(),
+      'header_row': profile.headerRow,
+      'columns_json': jsonEncode({
+        for (final entry in profile.columns.entries)
+          entry.key.name: entry.value,
+      }),
+      'defaults_json': jsonEncode({
+        for (final entry in profile.defaults.entries)
+          entry.key.name: entry.value,
+      }),
+      'updated_at': DateTime.now().toIso8601String(),
+    };
+    if (profile.id == null) {
+      return _db.insert('statement_import_profiles', row);
+    }
+    final count = await _db.update(
+      'statement_import_profiles',
+      row,
+      where: 'id = ?',
+      whereArgs: [profile.id],
+    );
+    if (count == 0) throw StateError('Import profile no longer exists.');
+    return profile.id!;
+  }
+
+  @override
+  Future<void> deleteStatementImportProfile(int id) =>
+      _db.delete('statement_import_profiles', where: 'id = ?', whereArgs: [id]);
 
   @override
   Future<int?> categoryForRecipient(String recipientKey) async {

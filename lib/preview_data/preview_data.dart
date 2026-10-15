@@ -10,7 +10,7 @@ import 'subscription_seed.dart';
 import 'transaction_seed.dart';
 
 const _previewSeedKey = 'preview_seed_version';
-const _previewSeedVersion = '3';
+const _previewSeedVersion = '4';
 
 /// Coordinates feature-specific fixtures for the isolated preview database.
 ///

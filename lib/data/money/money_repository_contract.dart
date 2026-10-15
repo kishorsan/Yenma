@@ -4,6 +4,8 @@ import '../../domain/debt.dart';
 import '../../domain/money.dart';
 import '../../domain/monthly_plan.dart';
 import '../../domain/split.dart';
+import '../../domain/import_foundation.dart';
+import '../../domain/statement_import.dart';
 import '../commitments/repository_contracts.dart';
 
 /// Application-facing contract for all persisted money features.
@@ -52,6 +54,29 @@ abstract interface class MoneyRepository
 
   /// Imports transactions while ignoring duplicate external identifiers.
   Future<int> importTransactions(List<MoneyTransaction> transactions);
+
+  /// Stages source records, applies exact deduplication, creates ledger rows,
+  /// and records provenance and safe reconciliation suggestions atomically.
+  Future<ImportBatchResult> importRecords(List<ImportRecord> records);
+
+  Future<List<FinancialAccount>> financialAccounts();
+
+  Future<List<ImportInboxItem>> importInbox({int limit = 100});
+
+  Future<List<ImportReconciliation>> importReconciliations();
+
+  /// Returns the exclusive end of the interval successfully covered by source.
+  Future<DateTime?> importCursor(String source);
+
+  Future<void> saveImportCursor(String source, DateTime coveredThrough);
+
+  Future<void> recordImportRun(ImportRunDiagnostic diagnostic);
+
+  Future<List<StatementImportProfile>> statementImportProfiles();
+
+  Future<int> saveStatementImportProfile(StatementImportProfile profile);
+
+  Future<void> deleteStatementImportProfile(int id);
 
   /// Returns the learned category for a normalized recipient key.
   Future<int?> categoryForRecipient(String recipientKey);
