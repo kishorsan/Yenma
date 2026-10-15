@@ -4,13 +4,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../data/money_repository.dart';
-import '../data/commitments_data.dart';
 import '../domain/money.dart';
 import '../domain/debt.dart';
 import '../domain/monthly_plan.dart';
 import '../domain/split.dart';
 import '../data/receipt_source.dart';
 import '../data/sms_sync.dart';
+import '../models/commitments/emi.dart';
+import '../models/commitments/loan.dart';
+import '../models/commitments/subscription.dart';
 
 class MoneyController extends ChangeNotifier {
   MoneyController(

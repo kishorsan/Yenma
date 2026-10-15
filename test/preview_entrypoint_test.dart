@@ -73,7 +73,8 @@ void main() {
       expect(await repository.emiInstallments(emis.first.id!), isNotEmpty);
 
       final loans = await repository.loans();
-      expect(loans, hasLength(2));
+      expect(loans, hasLength(3));
+      expect(loans.where((loan) => loan.isComplete), hasLength(1));
       expect(await repository.loanPayments(loans.first.id!), isNotEmpty);
 
       final groups = await repository.splitGroups();
@@ -95,6 +96,10 @@ void main() {
         debts.where((debt) => debt.direction == DebtDirection.iOwe),
         hasLength(2),
       );
+      final concertDebt = debts.singleWhere(
+        (debt) => debt.title == 'Concert tickets',
+      );
+      expect(concertDebt.repaidPaise, 75000);
     },
   );
 
@@ -112,7 +117,7 @@ void main() {
     expect(await repository.plansForMonth(today), hasLength(4));
     expect(await repository.subscriptions(), hasLength(5));
     expect(await repository.emis(), hasLength(2));
-    expect(await repository.loans(), hasLength(2));
+    expect(await repository.loans(), hasLength(3));
     expect(await repository.splitGroups(), hasLength(2));
     expect(await repository.debts(), hasLength(7));
   });

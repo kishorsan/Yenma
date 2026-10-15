@@ -1,211 +1,17 @@
 import 'package:sqflite/sqflite.dart';
 
-Future<void> createCommitmentsSchema(DatabaseExecutor db) async {
-  await db.execute('''CREATE TABLE IF NOT EXISTS subscriptions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    subscription_name TEXT NOT NULL,
-    amount_paise INTEGER NOT NULL CHECK(amount_paise > 0),
-    subscription_date INTEGER NOT NULL CHECK(subscription_date BETWEEN 1 AND 28),
-    billing_month INTEGER NOT NULL DEFAULT 1 CHECK(billing_month BETWEEN 1 AND 12),
-    type INTEGER NOT NULL CHECK(type IN (0,1)),
-    is_active INTEGER NOT NULL DEFAULT 1 CHECK(is_active IN (0,1)),
-    notify_me INTEGER NOT NULL DEFAULT 0 CHECK(notify_me IN (0,1)),
-    subscription_link TEXT
-  )''');
-  await db.execute(
-    'CREATE INDEX IF NOT EXISTS subscriptions_active_billing_day '
-    'ON subscriptions(is_active, subscription_date)',
-  );
-  await db.execute('''CREATE TABLE IF NOT EXISTS loans (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    emi_name TEXT NOT NULL DEFAULT 'EMI',
-    total_amount_paise INTEGER NOT NULL CHECK(total_amount_paise > 0),
-    amount_paid_paise INTEGER NOT NULL DEFAULT 0 CHECK(amount_paid_paise >= 0),
-    processing_fee_paise INTEGER NOT NULL DEFAULT 0 CHECK(processing_fee_paise >= 0),
-    billing_day INTEGER NOT NULL DEFAULT 1 CHECK(billing_day BETWEEN 1 AND 28),
-    emi_ownership TEXT NOT NULL DEFAULT 'MINE' CHECK(emi_ownership IN ('MINE','THROUGH_ME')),
-    note TEXT NOT NULL DEFAULT '',
-    start_date TEXT NOT NULL,
-    end_date TEXT,
-    status TEXT NOT NULL DEFAULT 'PENDING' CHECK(status IN ('PENDING','FULLY_PAID')),
-    loan_type TEXT NOT NULL CHECK(loan_type IN ('REVOLVING','ONE_TIME','EMI_AMORTIZING')),
-    is_emi INTEGER NOT NULL DEFAULT 0 CHECK(is_emi IN (0,1))
-  )''');
-  await db.execute('CREATE INDEX IF NOT EXISTS loans_status ON loans(status)');
-  await db.execute('''CREATE TABLE IF NOT EXISTS loan_tracking (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    loan_id INTEGER NOT NULL REFERENCES loans(id) ON DELETE CASCADE,
-    principal_paise INTEGER NOT NULL CHECK(principal_paise >= 0),
-    interest_paise INTEGER NOT NULL CHECK(interest_paise >= 0),
-    gst_paise INTEGER NOT NULL DEFAULT 0 CHECK(gst_paise >= 0),
-    date TEXT NOT NULL,
-    is_paid INTEGER NOT NULL DEFAULT 0 CHECK(is_paid IN (0,1)),
-    UNIQUE(loan_id, date)
-  )''');
-  await db.execute(
-    'CREATE INDEX IF NOT EXISTS loan_tracking_payment_schedule '
-    'ON loan_tracking(is_paid, date)',
-  );
-}
+import '../models/commitments/emi.dart';
+import '../models/commitments/loan.dart';
+import '../models/commitments/subscription.dart';
+import 'commitments/repository_contracts.dart';
 
-enum SubscriptionPeriod { monthly, yearly }
+export '../models/commitments/emi.dart';
+export '../models/commitments/loan.dart';
+export '../models/commitments/subscription.dart';
+export 'commitments/commitments_schema.dart';
+export 'commitments/repository_contracts.dart';
 
-enum LoanStatus { pending, fullyPaid }
-
-enum LoanType { revolving, oneTime, emiAmortizing }
-
-enum EmiOwnership { mine, throughMe }
-
-abstract interface class SubscriptionRepository {
-  Future<int> saveSubscription(SubscriptionRecord value);
-  Future<List<SubscriptionRecord>> subscriptions({bool? active});
-}
-
-abstract interface class EmiRepository {
-  Future<int> saveEmi(EmiRecord value);
-  Future<List<EmiRecord>> emis();
-  Future<List<EmiInstallment>> emiInstallments(int emiId);
-  Future<void> saveEmiInstallment({
-    int? id,
-    required int emiId,
-    required int principalPaise,
-    required int interestPaise,
-    required DateTime date,
-    required bool isPaid,
-  });
-  Future<int> loadGstBasisPoints();
-  Future<void> saveGstBasisPoints(int basisPoints);
-}
-
-abstract interface class LoanRepository {
-  Future<int> saveLoan(LoanRecord value);
-  Future<List<LoanRecord>> loans();
-  Future<List<LoanTrackingRecord>> loanPayments(int loanId);
-  Future<void> saveLoanPayment(LoanTrackingRecord value);
-}
-
-class EmiRecord {
-  const EmiRecord({
-    this.id,
-    required this.name,
-    required this.principalPaise,
-    this.paidPrincipalPaise = 0,
-    this.processingFeePaise = 0,
-    required this.billingDay,
-    required this.startDate,
-    this.endDate,
-    this.note = '',
-    this.ownership = EmiOwnership.mine,
-  });
-
-  final int? id;
-  final String name;
-  final int principalPaise;
-  final int paidPrincipalPaise;
-  final int processingFeePaise;
-  final int billingDay;
-  final DateTime startDate;
-  final DateTime? endDate;
-  final String note;
-  final EmiOwnership ownership;
-
-  int get remainingPaise =>
-      (principalPaise - paidPrincipalPaise).clamp(0, principalPaise);
-  bool get isComplete => remainingPaise == 0;
-}
-
-class EmiInstallment {
-  const EmiInstallment({
-    this.id,
-    required this.emiId,
-    required this.principalPaise,
-    required this.interestPaise,
-    required this.gstPaise,
-    required this.date,
-    required this.isPaid,
-  });
-
-  final int? id;
-  final int emiId;
-  final int principalPaise;
-  final int interestPaise;
-  final int gstPaise;
-  final DateTime date;
-  final bool isPaid;
-  int get totalPaise => principalPaise + interestPaise + gstPaise;
-}
-
-class SubscriptionRecord {
-  const SubscriptionRecord({
-    this.id,
-    required this.name,
-    required this.amountPaise,
-    required this.billingDay,
-    this.billingMonth = 1,
-    required this.period,
-    this.isActive = true,
-    this.notifyMe = false,
-    this.link,
-  });
-  final int? id;
-  final String name;
-  final int amountPaise;
-  final int billingDay;
-  final int billingMonth;
-  final SubscriptionPeriod period;
-  final bool isActive;
-  final bool notifyMe;
-  final String? link;
-}
-
-class LoanRecord {
-  const LoanRecord({
-    this.id,
-    this.name = 'Loan',
-    required this.totalAmountPaise,
-    this.amountPaidPaise = 0,
-    this.note = '',
-    required this.startDate,
-    this.endDate,
-    this.status = LoanStatus.pending,
-    required this.type,
-    this.isEmi = false,
-  });
-  final int? id;
-  final String name;
-  final int totalAmountPaise;
-  final int amountPaidPaise;
-  final String note;
-  final DateTime startDate;
-  final DateTime? endDate;
-  final LoanStatus status;
-  final LoanType type;
-  final bool isEmi;
-
-  int get remainingPaise =>
-      (totalAmountPaise - amountPaidPaise).clamp(0, totalAmountPaise);
-  bool get isComplete => remainingPaise == 0;
-}
-
-class LoanTrackingRecord {
-  const LoanTrackingRecord({
-    this.id,
-    required this.loanId,
-    required this.principalPaise,
-    required this.interestPaise,
-    this.gstPaise = 0,
-    required this.date,
-    this.isPaid = false,
-  });
-  final int? id;
-  final int loanId;
-  final int principalPaise;
-  final int interestPaise;
-  final int gstPaise;
-  final DateTime date;
-  final bool isPaid;
-}
-
+/// SQLite implementation shared by subscriptions, EMIs and loans.
 class CommitmentsRepository
     implements SubscriptionRepository, EmiRepository, LoanRepository {
   const CommitmentsRepository(this.db);
@@ -351,6 +157,7 @@ class CommitmentsRepository
     await saveLoanTracking(value);
   }
 
+  /// Stores a tracking row and recalculates the parent loan's paid principal.
   Future<void> saveLoanTracking(LoanTrackingRecord value) async {
     await db.transaction((txn) async {
       await txn.insert('loan_tracking', {

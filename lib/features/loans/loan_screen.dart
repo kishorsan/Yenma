@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../app/money_controller.dart';
-import '../../data/commitments_data.dart';
+import '../../models/commitments/loan.dart';
 import '../../domain/money.dart';
 
 class LoanScreen extends StatefulWidget {

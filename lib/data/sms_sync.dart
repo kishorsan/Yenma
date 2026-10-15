@@ -1,26 +1,14 @@
 import 'package:flutter/services.dart';
 
 import '../domain/money.dart';
+import '../models/sms_sync/bank_sms.dart';
 
-class BankSms {
-  const BankSms({
-    required this.address,
-    required this.body,
-    required this.timestamp,
-  });
-  final String address;
-  final String body;
-  final DateTime timestamp;
-}
+export '../models/sms_sync/bank_sms.dart';
+export '../models/sms_sync/sms_sync_result.dart';
 
-class SmsSyncResult {
-  const SmsSyncResult(this.imported, this.scanned, this.timestamp);
-  final int imported;
-  final int scanned;
-  final DateTime timestamp;
-}
-
+/// Converts supported bank SMS messages into normalized money transactions.
 class SmsParser {
+  /// Known sender fragments and the institution names shown in the UI.
   static const bankNames = <String, String>{
     'HDFC': 'HDFC Bank',
     'CANB': 'Canara Bank',
@@ -36,6 +24,7 @@ class SmsParser {
     'UBI': 'Union Bank',
   };
 
+  /// Parses [sms], returning `null` for unsupported or non-final notifications.
   static MoneyTransaction? parse(BankSms sms) {
     final upper = '${sms.address} ${sms.body}'.toUpperCase();
     final codes = bankNames.keys.toList()
@@ -200,8 +189,13 @@ class SmsParser {
       value.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]+'), ' ').trim();
 }
 
+/// Dart interface to the platform channel that reads and schedules SMS sync.
+///
+/// Native behavior is platform-specific and is not verified by this refactor.
 class SmsSyncService {
   static const _channel = MethodChannel('yenma/sms');
+
+  /// Reads messages in the optional half-open `[from, until)` time range.
   Future<List<BankSms>> read({DateTime? from, DateTime? until}) async {
     final values =
         await _channel.invokeListMethod<dynamic>('readMessages', {
@@ -229,5 +223,6 @@ class SmsSyncService {
         .toList();
   }
 
+  /// Requests the platform integration to register its daily sync schedule.
   Future<void> scheduleDaily() => _channel.invokeMethod('scheduleDailySync');
 }
