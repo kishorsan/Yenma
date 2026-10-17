@@ -3,7 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app/money_controller.dart';
-import '../../data/commitments_data.dart';
+import '../../models/commitments/subscription.dart';
 import '../../domain/money.dart';
 
 class SubscriptionsScreen extends StatefulWidget {

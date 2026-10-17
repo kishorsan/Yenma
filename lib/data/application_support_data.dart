@@ -1,22 +1,15 @@
 import 'package:sqflite/sqflite.dart';
 
-class SmsSyncLogRecord {
-  const SmsSyncLogRecord({
-    required this.id,
-    required this.completedAt,
-    required this.imported,
-    required this.automatic,
-  });
-  final int id;
-  final DateTime completedAt;
-  final int imported;
-  final bool automatic;
-}
+import '../models/application_support/sms_sync_log_record.dart';
 
+export '../models/application_support/sms_sync_log_record.dart';
+
+/// Reads and writes cross-feature settings and synchronization diagnostics.
 class ApplicationSupportRepository {
   const ApplicationSupportRepository(this.db);
   final Database db;
 
+  /// Returns the stored string value for [key], or `null` when it is unset.
   Future<String?> setting(String key) async {
     final rows = await db.query(
       'settings',
@@ -27,6 +20,7 @@ class ApplicationSupportRepository {
     return rows.isEmpty ? null : rows.single['value'] as String;
   }
 
+  /// Inserts or replaces an application setting.
   Future<void> saveSetting(String key, String value) async {
     await db.insert('settings', {
       'key': key,
@@ -34,6 +28,7 @@ class ApplicationSupportRepository {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
+  /// Loads recent SMS sync runs, newest first, capped by [limit].
   Future<List<SmsSyncLogRecord>> smsSyncHistory({int limit = 50}) async =>
       (await db.query(
             'sms_sync_log',

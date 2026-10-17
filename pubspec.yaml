@@ -39,7 +39,9 @@ dependencies:
   intl: ^0.20.3
   image_picker: ^1.2.3
   url_launcher: ^6.3.3
-
+  csv: 8.0.0
+  archive: 4.5.2
+  xml: 7.0.1
 dev_dependencies:
   integration_test:
     sdk: flutter
@@ -64,6 +66,10 @@ flutter:
   # included with your application, so that you can use the icons in
   # the material Icons class.
   uses-material-design: true
+
+  assets:
+    - assets/branding/
+    - assets/templates/
 
   # To add assets to your application, add an assets section, like this:
   # assets:

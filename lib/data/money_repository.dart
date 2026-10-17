@@ -1,66 +1,60 @@
 import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
+import 'dart:convert';
+
 import 'dart:typed_data';
 
 import '../domain/money.dart';
 import '../domain/debt.dart';
 import '../domain/monthly_plan.dart';
-import '../domain/split.dart';
+import '../domain/import_foundation.dart';
+import '../domain/statement_import.dart';
 import 'application_support_data.dart';
 import 'commitments_data.dart';
-import 'yenma_schema.dart';
 import 'debt_repository.dart';
+import 'money/money_repository_contract.dart';
+import 'money/money_schema.dart';
 import 'planning_data.dart';
 import 'reference_data.dart';
 import 'splitting_data.dart';
+import 'yenma_schema.dart';
 
-abstract interface class MoneyRepository
-    implements
-        DebtRepository,
-        SplitRepository,
-        SubscriptionRepository,
-        EmiRepository,
-        LoanRepository {
-  Future<void> initialize();
-  Future<List<MoneyCategory>> categories();
-  Future<List<MoneyTransaction>> transactions(DateTime month);
-  Future<List<MoneyTransaction>> transactionsBetween(
-    DateTime startInclusive,
-    DateTime endExclusive,
-  );
-  Future<void> save(MoneyTransaction transaction);
-  Future<List<MoneyPlan>> plansForMonth(DateTime month);
-  Future<List<PlanType>> planTypes();
-  Future<void> savePlan(MoneyPlan plan);
-  Future<void> bulkCategorize(
-    List<MoneyTransaction> transactions,
-    int categoryId,
-  );
-  Future<int> importTransactions(List<MoneyTransaction> transactions);
-  Future<int?> categoryForRecipient(String recipientKey);
-  Future<void> saveRecipientCategory(String recipientKey, int categoryId);
-  Future<void> saveTransactionReceipt(int transactionId, Uint8List bytes);
-  Future<Uint8List?> transactionReceipt(int transactionId);
-  Future<void> deleteTransactionReceipt(int transactionId);
-  Future<bool> wasSyncedOn(DateTime date);
-  Future<void> markSynced(DateTime date);
-  Future<DateTime?> lastSmsSyncAt();
-  Future<void> recordSmsSync({
-    required DateTime completedAt,
-    required int imported,
-    required bool automatic,
-  });
-  Future<void> delete(int id);
-  Future<String> loadTheme();
-  Future<void> saveTheme(String theme);
-  Future<bool> loadSmsConsent();
-  Future<void> saveSmsConsent(bool granted);
-  Future<bool> loadInitialSmsSyncComplete();
-  Future<void> saveInitialSmsSyncComplete();
-  Future<void> close();
+export 'money/money_repository_contract.dart';
+
+String _stablePayloadHash(String value) {
+  // FNV-1a is used as a deterministic local deduplication key. It is not a
+  // security boundary and the original payload remains available for audit.
+  var hash = 0xcbf29ce484222325;
+  for (final byte in value.codeUnits) {
+    hash ^= byte;
+    hash = (hash * 0x100000001b3) & 0x7fffffffffffffff;
+  }
+  return hash.toRadixString(16).padLeft(16, '0');
 }
 
+StatementImportProfile _statementProfileFromRow(Map<String, Object?> row) {
+  Map<StatementField, String> fields(String value) {
+    final decoded = Map<String, dynamic>.from(jsonDecode(value) as Map);
+    return {
+      for (final entry in decoded.entries)
+        StatementField.values.byName(entry.key): entry.value as String,
+    };
+  }
+
+  return StatementImportProfile(
+    id: row['id'] as int,
+    name: row['name'] as String,
+    sourceKey: row['source_key'] as String,
+    format: StatementFileFormat.values.byName(row['file_format'] as String),
+    sheetName: row['sheet_name'] as String?,
+    headerRow: row['header_row'] as int,
+    columns: fields(row['columns_json'] as String),
+    defaults: fields(row['defaults_json'] as String),
+  );
+}
+
+/// Main SQLite repository that composes all feature-specific data operations.
 class SqliteMoneyRepository
     with SqliteDebtOperations, SqliteSplitOperations
     implements MoneyRepository {
@@ -76,16 +70,17 @@ class SqliteMoneyRepository
   Database get splitDatabase => _db;
 
   @override
+  /// Opens the database once and runs creation or incremental migration logic.
   Future<void> initialize() async {
     if (_database != null) return;
     final path = _path ?? p.join(await _factory.getDatabasesPath(), 'yenma.db');
     _database = await _factory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 16,
+        version: 19,
         onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
         onCreate: (db, version) async {
-          await _createMoneySchema(db);
+          await createMoneySchema(db);
           await createDebtSchema(db);
           await createPeopleSchema(db);
           await createStructuredDataSchema(db);
@@ -94,30 +89,25 @@ class SqliteMoneyRepository
           if (oldVersion < 2) await createDebtSchema(db);
           if (oldVersion < 3) await createPeopleSchema(db);
           if (oldVersion < 4) {
-            await _addColumnIfMissing(db, 'transactions', 'bank_name', 'TEXT');
-            await _addColumnIfMissing(
-              db,
-              'transactions',
-              'external_id',
-              'TEXT',
-            );
-            await _addColumnIfMissing(
+            await addColumnIfMissing(db, 'transactions', 'bank_name', 'TEXT');
+            await addColumnIfMissing(db, 'transactions', 'external_id', 'TEXT');
+            await addColumnIfMissing(
               db,
               'transactions',
               'recipient_key',
               'TEXT',
             );
-            await _createTransactionsTable(db);
-            await _createRecipientCategoriesTable(db);
+            await createTransactionsTable(db);
+            await createRecipientCategoriesTable(db);
           }
           if (oldVersion < 5) {
-            await _addColumnIfMissing(
+            await addColumnIfMissing(
               db,
               'transactions',
               'has_receipt',
               'INTEGER NOT NULL DEFAULT 0',
             );
-            await _createTransactionReceiptChunksTable(db);
+            await createTransactionReceiptChunksTable(db);
             // Move legacy linked debt bills to their parent transaction without
             // dropping the old chunks, so existing debt history remains readable.
             await db.execute('''INSERT OR IGNORE INTO transaction_receipt_chunks
@@ -132,7 +122,7 @@ class SqliteMoneyRepository
             );
           }
           if (oldVersion < 6) {
-            await _createSmsSyncLogTable(db);
+            await createSmsSyncLogTable(db);
           }
           if (oldVersion < 7) {
             await db.execute(
@@ -141,18 +131,18 @@ class SqliteMoneyRepository
             );
           }
           if (oldVersion < 8) {
-            await _seedDefaultCategories(db);
+            await seedDefaultCategories(db);
           }
           if (oldVersion < 9) {
-            await _createMonthlyPlansTable(db);
+            await createMonthlyPlansTable(db);
           } else if (oldVersion < 10) {
-            await _migrateMonthlyPlansV10(db);
+            await migrateMonthlyPlansV10(db);
           }
           if (oldVersion < 11) {
             await createStructuredDataSchema(db);
           }
           if (oldVersion < 12) {
-            await _addColumnIfMissing(
+            await addColumnIfMissing(
               db,
               'money_plans',
               'remaining_amount',
@@ -164,7 +154,7 @@ class SqliteMoneyRepository
           }
           if (oldVersion < 13) await createSplittingSchema(db);
           if (oldVersion < 14) {
-            await _addColumnIfMissing(
+            await addColumnIfMissing(
               db,
               'subscriptions',
               'billing_month',
@@ -176,31 +166,31 @@ class SqliteMoneyRepository
             // were used at the time. Ensure the commitment tables exist before
             // extending them with the EMI-specific columns.
             await createCommitmentsSchema(db);
-            await _addColumnIfMissing(
+            await addColumnIfMissing(
               db,
               'loans',
               'emi_name',
               "TEXT NOT NULL DEFAULT 'EMI'",
             );
-            await _addColumnIfMissing(
+            await addColumnIfMissing(
               db,
               'loans',
               'processing_fee_paise',
               'INTEGER NOT NULL DEFAULT 0 CHECK(processing_fee_paise >= 0)',
             );
-            await _addColumnIfMissing(
+            await addColumnIfMissing(
               db,
               'loans',
               'billing_day',
               'INTEGER NOT NULL DEFAULT 1 CHECK(billing_day BETWEEN 1 AND 28)',
             );
-            await _addColumnIfMissing(
+            await addColumnIfMissing(
               db,
               'loans',
               'emi_ownership',
               "TEXT NOT NULL DEFAULT 'MINE' CHECK(emi_ownership IN ('MINE','THROUGH_ME'))",
             );
-            await _addColumnIfMissing(
+            await addColumnIfMissing(
               db,
               'loan_tracking',
               'gst_paise',
@@ -212,25 +202,48 @@ class SqliteMoneyRepository
               "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'transactions'",
             );
             if (transactionTable.isNotEmpty) {
-              await _addColumnIfMissing(
+              await addColumnIfMissing(
                 db,
                 'transactions',
                 'instrument_type',
                 "TEXT CHECK(instrument_type IN ('bankAccount','creditCard'))",
               );
-              await _addColumnIfMissing(
+              await addColumnIfMissing(
                 db,
                 'transactions',
                 'instrument_last4',
                 'TEXT',
               );
-              await _addColumnIfMissing(
+              await addColumnIfMissing(
                 db,
                 'transactions',
                 'import_role',
                 "TEXT CHECK(import_role IN ('cardPurchase','accountDebit','accountCredit','cardPayment'))",
               );
             }
+          }
+          if (oldVersion < 17) await createImportFoundationSchema(db);
+          if (oldVersion < 18) await createStatementImportProfilesTable(db);
+          if (oldVersion < 19) {
+            await addColumnIfMissing(
+              db,
+              'loans',
+              'annual_interest_basis_points',
+              'INTEGER CHECK(annual_interest_basis_points >= 0)',
+            );
+            await addColumnIfMissing(
+              db,
+              'loans',
+              'regular_payment_paise',
+              'INTEGER CHECK(regular_payment_paise > 0)',
+            );
+            await addColumnIfMissing(
+              db,
+              'loans',
+              'installment_count',
+              'INTEGER CHECK(installment_count > 0)',
+            );
+            await addColumnIfMissing(db, 'loans', 'first_due_date', 'TEXT');
           }
         },
       ),
@@ -254,6 +267,10 @@ class SqliteMoneyRepository
 
   @override
   Future<int> saveLoan(LoanRecord value) => commitments.saveLoan(value);
+
+  @override
+  Future<int> saveLoanWithSchedule(LoanRecord value) =>
+      commitments.saveLoanWithSchedule(value);
 
   @override
   Future<List<LoanRecord>> loans() => commitments.loans();
@@ -299,162 +316,6 @@ class SqliteMoneyRepository
   @override
   Future<void> saveGstBasisPoints(int basisPoints) =>
       commitments.saveGstBasisPoints(basisPoints);
-
-  static Future<void> _createMoneySchema(DatabaseExecutor db) async {
-    await _createCategoriesTable(db);
-    await _createTransactionsTable(db);
-    await _createSettingsTable(db);
-    await _createRecipientCategoriesTable(db);
-    await _createTransactionReceiptChunksTable(db);
-    await _createSmsSyncLogTable(db);
-    await _createMonthlyPlansTable(db);
-    await _seedDefaultCategories(db);
-  }
-
-  static Future<void> _addColumnIfMissing(
-    DatabaseExecutor db,
-    String table,
-    String column,
-    String definition,
-  ) async {
-    final columns = await db.rawQuery('PRAGMA table_info($table)');
-    if (columns.any((row) => row['name'] == column)) return;
-    await db.execute('ALTER TABLE $table ADD COLUMN $column $definition');
-  }
-
-  /// Stores the category catalogue used to classify money transactions.
-  /// Connected to: transactions and recipient_categories through category_id.
-  /// Last schema update: version 8, 2026-09-28.
-  static Future<void> _createCategoriesTable(DatabaseExecutor db) =>
-      db.execute('''CREATE TABLE IF NOT EXISTS categories (
-        id INTEGER PRIMARY KEY,
-        name TEXT NOT NULL,
-        icon TEXT NOT NULL,
-        color INTEGER NOT NULL,
-        kinds TEXT NOT NULL
-      )''');
-
-  /// Stores imported and manually-entered income, expense, and transfer rows.
-  /// Connected to: categories, debts, and transaction_receipt_chunks.
-  /// Last schema update: version 7, 2026-09-27.
-  static Future<void> _createTransactionsTable(DatabaseExecutor db) async {
-    await db.execute('''CREATE TABLE IF NOT EXISTS transactions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL CHECK(length(trim(title)) > 0),
-      amount_paise INTEGER NOT NULL CHECK(amount_paise > 0 AND amount_paise <= 999999999999),
-      currency TEXT NOT NULL DEFAULT 'INR' CHECK(currency = 'INR'),
-      kind TEXT NOT NULL CHECK(kind IN ('expense', 'income', 'transfer')),
-      category_id INTEGER NOT NULL REFERENCES categories(id) ON DELETE RESTRICT,
-      date TEXT NOT NULL,
-      note TEXT NOT NULL DEFAULT '',
-      source TEXT NOT NULL DEFAULT 'MANUAL',
-      bank_name TEXT,
-      instrument_type TEXT CHECK(instrument_type IN ('bankAccount','creditCard')),
-      instrument_last4 TEXT,
-      import_role TEXT CHECK(import_role IN ('cardPurchase','accountDebit','accountCredit','cardPayment')),
-      external_id TEXT,
-      recipient_key TEXT,
-      has_receipt INTEGER NOT NULL DEFAULT 0
-    )''');
-    await db.execute(
-      'CREATE INDEX IF NOT EXISTS transactions_date_id ON transactions(date DESC, id DESC)',
-    );
-    await db.execute(
-      'CREATE UNIQUE INDEX IF NOT EXISTS transactions_external_id ON transactions(external_id) WHERE external_id IS NOT NULL',
-    );
-  }
-
-  /// Stores small application preferences and synchronization flags.
-  /// Connected to: no table; keys are interpreted by repository methods.
-  /// Last schema update: version 1, 2026-09-12.
-  static Future<void> _createSettingsTable(DatabaseExecutor db) => db.execute(
-    'CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)',
-  );
-
-  /// Remembers a category choice for a normalized imported recipient name.
-  /// Connected to: categories through category_id and transactions logically
-  /// through recipient_key.
-  /// Last schema update: version 4, 2026-09-27.
-  static Future<void> _createRecipientCategoriesTable(DatabaseExecutor db) =>
-      db.execute('''CREATE TABLE IF NOT EXISTS recipient_categories (
-        recipient_key TEXT PRIMARY KEY,
-        category_id INTEGER NOT NULL REFERENCES categories(id)
-      )''');
-
-  /// Stores transaction receipt images in bounded chunks.
-  /// Connected to: transactions through transaction_id with cascade delete.
-  /// Last schema update: version 5, 2026-09-27.
-  static Future<void> _createTransactionReceiptChunksTable(
-    DatabaseExecutor db,
-  ) => db.execute('''CREATE TABLE IF NOT EXISTS transaction_receipt_chunks (
-    transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
-    chunk_index INTEGER NOT NULL,
-    bytes BLOB NOT NULL,
-    PRIMARY KEY(transaction_id, chunk_index)
-  )''');
-
-  /// Records completed SMS synchronization runs for scheduling and diagnostics.
-  /// Connected to: no table; imported counts summarize transaction inserts.
-  /// Last schema update: version 6, 2026-09-27.
-  static Future<void> _createSmsSyncLogTable(DatabaseExecutor db) =>
-      db.execute('''CREATE TABLE IF NOT EXISTS sms_sync_log (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        completed_at TEXT NOT NULL,
-        imported INTEGER NOT NULL,
-        automatic INTEGER NOT NULL CHECK(automatic IN (0,1))
-      )''');
-
-  /// Stores one planned amount per month, allocation, and subtype.
-  /// Connected to: no table yet; future tracking will reconcile these rows with
-  /// transactions without coupling the planning schema to transaction history.
-  /// Last schema update: version 10, 2026-09-29.
-  static Future<void> _createMonthlyPlansTable(DatabaseExecutor db) =>
-      db.execute('''CREATE TABLE IF NOT EXISTS monthly_plans (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        month_year TEXT NOT NULL,
-        allocation TEXT NOT NULL CHECK(length(trim(allocation)) > 0),
-        subtype TEXT NOT NULL CHECK(length(trim(subtype)) > 0),
-        planned_paise INTEGER NOT NULL CHECK(planned_paise >= 0),
-        UNIQUE(month_year, allocation, subtype)
-      )''');
-
-  static Future<void> _migrateMonthlyPlansV10(DatabaseExecutor db) async {
-    final columns = await db.rawQuery('PRAGMA table_info(monthly_plans)');
-    if (columns.any((column) => column['name'] == 'allocation')) return;
-    await db.execute('ALTER TABLE monthly_plans RENAME TO monthly_plans_v9');
-    await _createMonthlyPlansTable(db);
-    const allocations = <String, String>{
-      'Salary': 'salary_paise',
-      'Investment': 'investment_paise',
-      'Savings': 'savings_paise',
-      'Loan': 'loans_paise',
-      'Daily Spend': 'daily_spend_paise',
-    };
-    for (final entry in allocations.entries) {
-      await db.execute(
-        '''INSERT INTO monthly_plans
-        (month_year, allocation, subtype, planned_paise)
-        SELECT substr(month, 1, 7), ?, 'General', ${entry.value}
-        FROM monthly_plans_v9''',
-        [entry.key],
-      );
-    }
-    await db.execute('DROP TABLE monthly_plans_v9');
-  }
-
-  static Future<void> _seedDefaultCategories(DatabaseExecutor db) async {
-    final batch = db.batch();
-    for (final category in defaultCategories) {
-      batch.insert('categories', {
-        'id': category.id,
-        'name': category.name,
-        'icon': category.icon,
-        'color': category.color,
-        'kinds': category.kinds.map((kind) => kind.name).join(','),
-      }, conflictAlgorithm: ConflictAlgorithm.ignore);
-    }
-    await batch.commit(noResult: true);
-  }
 
   @override
   Future<List<MoneyPlan>> plansForMonth(DateTime month) =>
@@ -582,6 +443,348 @@ class SqliteMoneyRepository
     });
     return imported;
   }
+
+  @override
+  Future<ImportBatchResult> importRecords(List<ImportRecord> records) async {
+    var parsed = 0;
+    var imported = 0;
+    var duplicates = 0;
+    var rejected = 0;
+    var suggestions = 0;
+    await _db.transaction((db) async {
+      for (final record in records) {
+        final transaction = record.transaction;
+        if (transaction != null) parsed++;
+        final sameSourceItem = await db.query(
+          'import_inbox',
+          columns: ['id'],
+          where: 'source = ? AND source_item_id = ?',
+          whereArgs: [record.source, record.sourceItemId],
+          limit: 1,
+        );
+        if (sameSourceItem.isNotEmpty) {
+          duplicates++;
+          continue;
+        }
+
+        final payloadHash = _stablePayloadHash(record.rawPayload);
+        final samePayload = await db.query(
+          'import_inbox',
+          columns: ['id'],
+          where: 'source = ? AND payload_hash = ? AND raw_payload = ?',
+          whereArgs: [record.source, payloadHash, record.rawPayload],
+          limit: 1,
+        );
+        if (samePayload.isNotEmpty) {
+          await _insertInbox(
+            db,
+            record,
+            payloadHash,
+            ImportInboxStatus.duplicate,
+            reason: 'same_payload',
+          );
+          duplicates++;
+          continue;
+        }
+        if (transaction == null) {
+          await _insertInbox(
+            db,
+            record,
+            payloadHash,
+            ImportInboxStatus.rejected,
+            reason: record.rejectionReason ?? 'unsupported_message',
+          );
+          rejected++;
+          continue;
+        }
+        if (transaction.externalId != null) {
+          final existingTransaction = await db.query(
+            'transactions',
+            columns: ['id'],
+            where: 'external_id = ?',
+            whereArgs: [transaction.externalId],
+            limit: 1,
+          );
+          if (existingTransaction.isNotEmpty) {
+            await _insertInbox(
+              db,
+              record,
+              payloadHash,
+              ImportInboxStatus.duplicate,
+              reason: 'same_external_id',
+              transactionId: existingTransaction.single['id'] as int,
+            );
+            duplicates++;
+            continue;
+          }
+        }
+
+        final accountId = await _upsertFinancialAccount(db, transaction);
+        final inboxId = await _insertInbox(
+          db,
+          record,
+          payloadHash,
+          ImportInboxStatus.imported,
+          accountId: accountId,
+        );
+        final transactionId = await writeTransaction(db, transaction);
+        await db.update(
+          'import_inbox',
+          {'transaction_id': transactionId},
+          where: 'id = ?',
+          whereArgs: [inboxId],
+        );
+        await db.insert('transaction_provenance', {
+          'transaction_id': transactionId,
+          'inbox_id': inboxId,
+          'source': record.source,
+          'source_item_id': record.sourceItemId,
+        });
+        imported++;
+        suggestions += await _suggestReconciliations(
+          db,
+          transactionId,
+          transaction,
+        );
+      }
+    });
+    return ImportBatchResult(
+      scanned: records.length,
+      parsed: parsed,
+      imported: imported,
+      duplicates: duplicates,
+      rejected: rejected,
+      reconciliationSuggestions: suggestions,
+    );
+  }
+
+  Future<int> _insertInbox(
+    DatabaseExecutor db,
+    ImportRecord record,
+    String payloadHash,
+    ImportInboxStatus status, {
+    String? reason,
+    int? transactionId,
+    int? accountId,
+  }) => db.insert('import_inbox', {
+    'source': record.source,
+    'source_item_id': record.sourceItemId,
+    'payload_hash': payloadHash,
+    'raw_payload': record.rawPayload,
+    'received_at': record.receivedAt.toIso8601String(),
+    'status': status.name,
+    'reason': reason,
+    'transaction_id': transactionId,
+    'account_id': accountId,
+  });
+
+  Future<int?> _upsertFinancialAccount(
+    DatabaseExecutor db,
+    MoneyTransaction transaction,
+  ) async {
+    final institution = transaction.bankName?.trim();
+    final type = transaction.instrumentType;
+    if (institution == null || institution.isEmpty || type == null) return null;
+    final rows = await db.query(
+      'financial_accounts',
+      columns: ['id'],
+      where: "institution = ? AND instrument_type = ? AND IFNULL(instrument_last4, '') = ?",
+      whereArgs: [institution, type.name, transaction.instrumentLast4 ?? ''],
+      limit: 1,
+    );
+    if (rows.isNotEmpty) return rows.single['id'] as int;
+    return db.insert('financial_accounts', {
+      'institution': institution,
+      'instrument_type': type.name,
+      'instrument_last4': transaction.instrumentLast4,
+      'display_name': transaction.instrumentLabel,
+    });
+  }
+
+  Future<int> _suggestReconciliations(
+    DatabaseExecutor db,
+    int transactionId,
+    MoneyTransaction transaction,
+  ) async {
+    final role = transaction.importRole;
+    if (role != ImportedTransactionRole.accountDebit &&
+        role != ImportedTransactionRole.cardPayment) {
+      return 0;
+    }
+    final counterpart = role == ImportedTransactionRole.accountDebit
+        ? ImportedTransactionRole.cardPayment
+        : ImportedTransactionRole.accountDebit;
+    final candidates = await db.query(
+      'transactions',
+      columns: ['id', 'date'],
+      where: 'id != ? AND import_role = ? AND amount_paise = ?',
+      whereArgs: [transactionId, counterpart.name, transaction.amountPaise],
+    );
+    var count = 0;
+    for (final candidate in candidates) {
+      final candidateDate = parseTransactionDate(candidate['date'] as String);
+      final distance = calendarDate(candidateDate)
+          .difference(calendarDate(transaction.date))
+          .inDays
+          .abs();
+      if (distance > 3) continue;
+      final candidateId = candidate['id'] as int;
+      final debitId = role == ImportedTransactionRole.accountDebit
+          ? transactionId
+          : candidateId;
+      final paymentId = role == ImportedTransactionRole.cardPayment
+          ? transactionId
+          : candidateId;
+      final inserted = await db.insert('import_reconciliations', {
+        'account_debit_transaction_id': debitId,
+        'card_payment_transaction_id': paymentId,
+        'status': ReconciliationStatus.suggested.name,
+        'amount_paise': transaction.amountPaise,
+        'date_distance_days': distance,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      if (inserted != 0) count++;
+    }
+    return count;
+  }
+
+  @override
+  Future<List<FinancialAccount>> financialAccounts() async =>
+      (await _db.query('financial_accounts', orderBy: 'display_name ASC'))
+          .map(
+            (row) => FinancialAccount(
+              id: row['id'] as int,
+              institution: row['institution'] as String,
+              type: FinancialInstrumentType.values.byName(
+                row['instrument_type'] as String,
+              ),
+              last4: row['instrument_last4'] as String?,
+              displayName: row['display_name'] as String,
+            ),
+          )
+          .toList();
+
+  @override
+  Future<List<ImportInboxItem>> importInbox({int limit = 100}) async =>
+      (await _db.query('import_inbox', orderBy: 'id DESC', limit: limit))
+          .map(
+            (row) => ImportInboxItem(
+              id: row['id'] as int,
+              source: row['source'] as String,
+              sourceItemId: row['source_item_id'] as String,
+              receivedAt: DateTime.parse(row['received_at'] as String),
+              status: ImportInboxStatus.values.byName(row['status'] as String),
+              reason: row['reason'] as String?,
+              transactionId: row['transaction_id'] as int?,
+              accountId: row['account_id'] as int?,
+            ),
+          )
+          .toList();
+
+  @override
+  Future<List<ImportReconciliation>> importReconciliations() async =>
+      (await _db.query('import_reconciliations', orderBy: 'id DESC'))
+          .map(
+            (row) => ImportReconciliation(
+              id: row['id'] as int,
+              accountDebitTransactionId:
+                  row['account_debit_transaction_id'] as int,
+              cardPaymentTransactionId:
+                  row['card_payment_transaction_id'] as int,
+              status: ReconciliationStatus.values.byName(
+                row['status'] as String,
+              ),
+              amountPaise: row['amount_paise'] as int,
+              dateDistanceDays: row['date_distance_days'] as int,
+            ),
+          )
+          .toList();
+
+  @override
+  Future<DateTime?> importCursor(String source) async {
+    final rows = await _db.query(
+      'import_cursors',
+      where: 'source = ?',
+      whereArgs: [source],
+      limit: 1,
+    );
+    return rows.isEmpty
+        ? null
+        : DateTime.parse(rows.single['covered_through'] as String);
+  }
+
+  @override
+  Future<void> saveImportCursor(String source, DateTime coveredThrough) =>
+      _db.insert('import_cursors', {
+        'source': source,
+        'covered_through': coveredThrough.toIso8601String(),
+      }, conflictAlgorithm: ConflictAlgorithm.replace);
+
+  @override
+  Future<void> recordImportRun(ImportRunDiagnostic diagnostic) => _db.insert(
+    'import_runs',
+    {
+      'source': diagnostic.source,
+      'started_at': diagnostic.startedAt.toIso8601String(),
+      'completed_at': diagnostic.completedAt.toIso8601String(),
+      'from_at': diagnostic.from.toIso8601String(),
+      'until_at': diagnostic.until.toIso8601String(),
+      'automatic': diagnostic.automatic ? 1 : 0,
+      'scanned': diagnostic.result.scanned,
+      'parsed': diagnostic.result.parsed,
+      'imported': diagnostic.result.imported,
+      'duplicates': diagnostic.result.duplicates,
+      'rejected': diagnostic.result.rejected,
+      'reconciliation_suggestions': diagnostic.result.reconciliationSuggestions,
+      'error_code': diagnostic.errorCode,
+    },
+  );
+
+  @override
+  Future<List<StatementImportProfile>> statementImportProfiles() async =>
+      (await _db.query(
+        'statement_import_profiles',
+        orderBy: 'name ASC',
+      )).map(_statementProfileFromRow).toList();
+
+  @override
+  Future<int> saveStatementImportProfile(StatementImportProfile profile) async {
+    if (profile.name.trim().isEmpty ||
+        profile.sourceKey.trim().isEmpty ||
+        profile.headerRow < 0) {
+      throw ArgumentError('Invalid statement import profile.');
+    }
+    final row = {
+      'name': profile.name.trim(),
+      'source_key': profile.sourceKey.trim(),
+      'file_format': profile.format.name,
+      'sheet_name': profile.sheetName?.trim(),
+      'header_row': profile.headerRow,
+      'columns_json': jsonEncode({
+        for (final entry in profile.columns.entries)
+          entry.key.name: entry.value,
+      }),
+      'defaults_json': jsonEncode({
+        for (final entry in profile.defaults.entries)
+          entry.key.name: entry.value,
+      }),
+      'updated_at': DateTime.now().toIso8601String(),
+    };
+    if (profile.id == null) {
+      return _db.insert('statement_import_profiles', row);
+    }
+    final count = await _db.update(
+      'statement_import_profiles',
+      row,
+      where: 'id = ?',
+      whereArgs: [profile.id],
+    );
+    if (count == 0) throw StateError('Import profile no longer exists.');
+    return profile.id!;
+  }
+
+  @override
+  Future<void> deleteStatementImportProfile(int id) =>
+      _db.delete('statement_import_profiles', where: 'id = ?', whereArgs: [id]);
 
   @override
   Future<int?> categoryForRecipient(String recipientKey) async {
@@ -715,6 +918,7 @@ class SqliteMoneyRepository
     });
   }
 
+  /// Writes one transaction using [db] so callers can share an outer transaction.
   @override
   Future<int> writeTransaction(
     DatabaseExecutor db,
