@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../app/money_controller.dart';
-import '../../data/commitments_data.dart';
+import '../../models/commitments/emi.dart';
 import '../../domain/money.dart';
 
 class EmiScreen extends StatefulWidget {
@@ -225,6 +225,8 @@ class _EmiDetailScreenState extends State<EmiDetailScreen> {
   List<EmiInstallment> _installments = const [];
   bool _loading = true;
 
+  int get _totalRepaymentPaise => _emi.totalRepaymentPaise(_installments);
+
   @override
   void initState() {
     super.initState();
@@ -317,6 +319,10 @@ class _EmiDetailScreenState extends State<EmiDetailScreen> {
                           _fact(
                             'Processing fee',
                             formatMoney(_emi.processingFeePaise),
+                          ),
+                          _fact(
+                            'Total repayment recorded',
+                            formatMoney(_totalRepaymentPaise),
                           ),
                           _fact(
                             'EMI date',
@@ -413,6 +419,7 @@ class _RecordEmiScreenState extends State<RecordEmiScreen> {
   DateTime? _end;
   late int _billingDay;
   late EmiOwnership _ownership;
+  late bool _hasProcessingFee;
   bool _saving = false;
 
   @override
@@ -424,8 +431,13 @@ class _RecordEmiScreenState extends State<RecordEmiScreen> {
     _principal = TextEditingController(
       text: emi == null ? '' : _amountText(emi.principalPaise),
     );
+    _hasProcessingFee = emi != null && emi.processingFeePaise > 0;
     _fee = TextEditingController(
-      text: emi == null ? '0' : _amountText(emi.processingFeePaise),
+      text: _amountText(
+        emi == null || emi.processingFeePaise == 0
+            ? 29900
+            : emi.processingFeePaise,
+      ),
     );
     _note = TextEditingController(text: emi?.note ?? '');
     _start =
@@ -469,7 +481,9 @@ class _RecordEmiScreenState extends State<RecordEmiScreen> {
           name: _name.text.trim(),
           principalPaise: parsePaise(_principal.text)!,
           paidPrincipalPaise: widget.emi?.paidPrincipalPaise ?? 0,
-          processingFeePaise: _parseNonNegativePaise(_fee.text)!,
+          processingFeePaise: _hasProcessingFee
+              ? _parseNonNegativePaise(_fee.text)!
+              : 0,
           billingDay: _billingDay,
           startDate: _start,
           endDate: _end,
@@ -535,8 +549,33 @@ class _RecordEmiScreenState extends State<RecordEmiScreen> {
               ),
               const SizedBox(height: 18),
               _amountField(_principal, 'Principal amount', positive: true),
-              const SizedBox(height: 18),
-              _amountField(_fee, 'One-time processing fee'),
+              const SizedBox(height: 10),
+              CheckboxListTile(
+                key: const Key('emi_processing_fee_enabled'),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+                title: const Text('Processing fee'),
+                subtitle: const Text(
+                  'Add this once to the total EMI repayment.',
+                ),
+                value: _hasProcessingFee,
+                onChanged: _saving
+                    ? null
+                    : (value) => setState(() {
+                        _hasProcessingFee = value ?? false;
+                        if (_hasProcessingFee &&
+                            (_parseNonNegativePaise(_fee.text) ?? 0) == 0) {
+                          _fee.text = '299.00';
+                        }
+                      }),
+              ),
+              if (_hasProcessingFee) ...[
+                const SizedBox(height: 8),
+                _amountField(
+                  _fee,
+                  'Processing fee amount',
+                  key: const Key('emi_processing_fee_amount'),
+                ),
+              ],
               const SizedBox(height: 18),
               DropdownButtonFormField<int>(
                 initialValue: _billingDay,
@@ -592,7 +631,9 @@ class _RecordEmiScreenState extends State<RecordEmiScreen> {
     TextEditingController controller,
     String label, {
     bool positive = false,
+    Key? key,
   }) => TextFormField(
+    key: key,
     controller: controller,
     enabled: !_saving,
     keyboardType: const TextInputType.numberWithOptions(decimal: true),

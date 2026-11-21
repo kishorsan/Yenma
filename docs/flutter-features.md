@@ -1,5 +1,16 @@
 # Yenma Flutter: features, use cases, and problems solved
 
+Import foundation work is documented in
+[flutter-import-foundation.md](flutter-import-foundation.md). Its persistence,
+deduplication, provenance, cursor, and suggestion layers are implemented; the
+review/diagnostics UI and reconciliation decisions remain planned.
+
+Statement connection work is documented in
+[flutter-statement-connections.md](flutter-statement-connections.md). Canonical
+CSV/XLSX decoding, configurable mappings, saved profiles, and a bundled Excel
+template exist at the data boundary; file-selection and mapping UI remain
+planned.
+
 Reviewed 8 October 2026 against the current Flutter working tree, including uncommitted Dart changes. App version in pubspec.yaml: 0.2.2+4. This is a source-based inventory, not a device verification or a claim about an installed build. No Kotlin source or Kotlin Gradle scripts were inspected or changed.
 
 Earlier debt and split proposals are tracked in [debt-experience-proposal.md](debt-experience-proposal.md). Reusable split groups and the conversational split flow are now implemented; other proposal items remain subject to their source evidence and open questions.
@@ -116,7 +127,7 @@ Evidence: [welcome screen](../lib/features/welcome_screen.dart), [app compositio
 | F41 | Light, dark, and follow-system appearance; preference saved locally. | Keep the app comfortable in different lighting. | Support visual preference without reselecting it each launch. |
 | F42 | Random welcome phrase once per launch, automatic continuation after two seconds, immediate Open my money action. Accessible-navigation mode requires manual continuation. | Enter the app through a short branded welcome. | Likely a tone/branding choice; a specific user problem is unconfirmed. Manual continuation prevents the text disappearing while being read. |
 | F43 | Bottom navigation on narrow layouts, navigation rail on wider layouts, constrained content width, and stacking summary cards for larger text. | Use a wider screen or larger text setting. | Keep navigation and financial values readable across supported layouts. This does not establish platform support or certify full accessibility. |
-| F44 | Local SQLite persistence for entries, debts, receipts, names, categories, plans, split groups, commitments, and preferences; current schema is version 16 with upgrade paths. Imported transactions retain account/card identity and import role. | Close and reopen the app without losing saved records. | Preserve history and preferences locally and support upgrading existing Yenma databases. No export, backup, or restore UI exists. |
+| F44 | Local SQLite persistence for entries, debts, receipts, names, categories, plans, split groups, commitments, and preferences; current schema is version 19 with upgrade paths. Imported transactions retain account/card identity and import role. | Close and reopen the app without losing saved records. | Preserve history and preferences locally and support upgrading existing Yenma databases. No export, backup, or restore UI exists. |
 | F45 | Exact integer-paise money handling and Indian rupee formatting. | Record ₹123.45 without floating-point rounding drift. | Keep stored amounts and aggregation exact to the paise. INR is fixed, not a currency selector. |
 | F46 | Empty/loading/error states, retry actions, and protection against older asynchronous loads overwriting newer selections. | Switch months quickly or retry a failed read. | Explain absent data and avoid showing the wrong selection’s results. |
 | F47 | Settings displays INR, local-storage/no-account information, and app version. | Check the app’s currency and basic storage model. | Set expectations about how records are handled. These labels are informational controls, not editable preferences. |
@@ -149,9 +160,9 @@ Evidence: [loan screens](../lib/features/loans/loan_screen.dart), [commitment pe
 
 | ID | Existing feature and behavior | Example use case | Problem it solves |
 | --- | --- | --- | --- |
-| F61 | Record and edit a loan with a lender/name, original amount, repayment type, start date, optional expected end date, and notes. Supported types are revolving credit, single repayment, and regular repayments. | Track a bank vehicle loan or an informal one-time loan. | Keeps the essential terms and identity of different borrowing arrangements in one local record. Loan records do not create ledger transactions. |
+| F61 | Capture a new regular monthly loan with only lender/name, financed amount, regular instalment amount, instalment count, and first due date. Monthly frequency, approximate nominal annual interest rate, reducing-balance calculation, expected end date, and the full principal/interest schedule are derived automatically. Existing records retain editing for revolving credit, single repayment, and regular-repayment metadata. | Enter ₹4,30,000 with a ₹11,345 regular instalment for 48 months and the first payment due on 7 November 2026; Yenma derives approximately 12.10%. | Starts useful repayment tracking from information commonly printed on the schedule without requiring the user to know the rate or transcribe every row. Loan records and generated dues do not create ledger transactions. |
 | F62 | Browse active and completed loan cards with total outstanding principal, per-loan remaining balance, and principal repayment progress. EMI records remain separate from this list. | Check the total principal still owed across active loans. | Provides a portfolio-level balance without double-counting the separate EMI feature. |
-| F63 | Add or edit scheduled and paid repayment entries with principal, interest, optional fees/charges, and a payment or due date. Only paid principal reduces the balance and a loan completes when paid principal reaches the original amount. | Add next month's due amount now, then mark it paid later. | Combines a lightweight payment schedule with repayment history while keeping interest and charges out of principal progress. |
+| F63 | Generate a complete fixed-rate monthly repayment schedule atomically, ordered from first to last due date, or add/edit individual scheduled and paid repayments with principal, interest, optional fees/charges, and a payment or due date. The final generated row absorbs paise rounding so scheduled principal equals the financed amount. Only paid principal reduces the balance and a loan completes when paid principal reaches the original amount. | Review how interest falls and principal rises over 48 payments, then mark each due entry paid. | Combines an amortization forecast with repayment history while keeping interest and charges out of principal progress. Lender-specific broken-period interest or rounding can still be represented by editing individual rows. |
 | F64 | Validate positive loan totals, chronological date ranges, non-negative payment components, payment dates within the loan range, and cumulative paid principal that does not exceed the original amount. | Catch an accidental payment that would overpay principal. | Prevents contradictory loan balances and invalid schedules. |
 
 ## Product intent that needs confirmation

@@ -55,11 +55,26 @@ void main() {
     final emiFields = find.byType(TextFormField);
     await tester.enterText(emiFields.at(0), 'Phone');
     await tester.enterText(emiFields.at(1), '1000');
-    await tester.enterText(emiFields.at(2), '99');
+    await tester.tap(find.byKey(const Key('emi_processing_fee_enabled')));
+    await tester.pump();
+    expect(
+      tester
+          .widget<TextFormField>(
+            find.byKey(const Key('emi_processing_fee_amount')),
+          )
+          .controller
+          ?.text,
+      '299.00',
+    );
+    await tester.enterText(
+      find.byKey(const Key('emi_processing_fee_amount')),
+      '99',
+    );
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
     expect(repository.savedEmis, hasLength(1));
+    expect(repository.savedEmis.single.processingFeePaise, 9900);
     expect(find.text('Phone'), findsOneWidget);
     expect(find.textContaining('₹1,000.00 remaining'), findsOneWidget);
 
@@ -77,5 +92,30 @@ void main() {
 
     expect(repository.savedEmiInstallments, hasLength(1));
     expect(find.text('₹261.80'), findsOneWidget);
+    expect(find.text('₹360.80'), findsOneWidget);
+  });
+
+  testWidgets('processing fee is optional and defaults to 299 when enabled', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = MemoryRepository();
+    final controller = MoneyController(repository);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(home: RecordEmiScreen(controller: controller)),
+    );
+
+    expect(find.byKey(const Key('emi_processing_fee_amount')), findsNothing);
+    await tester.tap(find.byKey(const Key('emi_processing_fee_enabled')));
+    await tester.pump();
+    final feeField = tester.widget<TextFormField>(
+      find.byKey(const Key('emi_processing_fee_amount')),
+    );
+    expect(feeField.controller?.text, '299.00');
   });
 }

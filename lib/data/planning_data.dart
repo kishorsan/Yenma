@@ -1,46 +1,17 @@
 import 'package:sqflite/sqflite.dart';
 
 import '../domain/monthly_plan.dart';
+import '../models/planning/money_plan_record.dart';
 
-Future<void> createPlanningSchema(DatabaseExecutor db) async {
-  await db.execute('''CREATE TABLE IF NOT EXISTS money_plans (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    plan_id INTEGER NOT NULL REFERENCES plan_type(id) ON DELETE RESTRICT,
-    note TEXT NOT NULL DEFAULT '',
-    planned_amount INTEGER NOT NULL CHECK(planned_amount >= 0),
-    remaining_amount INTEGER NOT NULL CHECK(remaining_amount >= 0 AND remaining_amount <= planned_amount),
-    month_year TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )''');
-  await db.execute(
-    'CREATE UNIQUE INDEX IF NOT EXISTS money_plans_month_type_note '
-    'ON money_plans(month_year, plan_id, note)',
-  );
-}
+export '../models/planning/money_plan_record.dart';
+export 'planning/planning_schema.dart';
 
-class MoneyPlanRecord {
-  const MoneyPlanRecord({
-    this.id,
-    required this.planId,
-    required this.plannedAmount,
-    required this.remainingAmount,
-    required this.monthYear,
-    this.note = '',
-    this.createdAt,
-  });
-  final int? id;
-  final int planId;
-  final int plannedAmount;
-  final int remainingAmount;
-  final String monthYear;
-  final String note;
-  final DateTime? createdAt;
-}
-
+/// Maps normalized planning rows to persistence and feature-domain models.
 class PlanningRepository {
   const PlanningRepository(this.db);
   final Database db;
 
+  /// Loads raw persistence records for a `YYYY-MM` month key.
   Future<List<MoneyPlanRecord>> plansForMonth(String monthYear) async =>
       (await db.query(
             'money_plans',
@@ -61,6 +32,7 @@ class PlanningRepository {
           )
           .toList();
 
+  /// Inserts or replaces a raw normalized plan record.
   Future<int> save(MoneyPlanRecord plan) => db.insert('money_plans', {
     if (plan.id != null) 'id': plan.id,
     'plan_id': plan.planId,
@@ -70,10 +42,12 @@ class PlanningRepository {
     'month_year': plan.monthYear,
   }, conflictAlgorithm: ConflictAlgorithm.replace);
 
+  /// Deletes the plan identified by [id].
   Future<void> delete(int id) async {
     await db.delete('money_plans', where: 'id = ?', whereArgs: [id]);
   }
 
+  /// Loads feature models joined with their reusable plan-type names.
   Future<List<MoneyPlan>> plansWithTypesForMonth(String monthYear) async =>
       (await db.rawQuery(
         '''SELECT mp.id, mp.plan_id, pt.plan, mp.note, mp.planned_amount,
@@ -86,6 +60,7 @@ class PlanningRepository {
         [monthYear],
       )).map(_moneyPlanFromRow).toList();
 
+  /// Loads plan types that have been used, sorted for form suggestions.
   Future<List<PlanType>> planTypeSuggestions() async =>
       (await db.rawQuery('''SELECT DISTINCT pt.id, pt.plan
            FROM plan_type pt
@@ -97,6 +72,7 @@ class PlanningRepository {
           )
           .toList();
 
+  /// Validates and stores a plan, creating its plan type when necessary.
   Future<void> savePlan(MoneyPlan plan) async {
     final name = plan.planName.trim();
     if (name.isEmpty ||

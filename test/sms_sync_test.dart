@@ -1,11 +1,13 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:yenma/data/sms_sync.dart';
+import 'package:yenma/data/sms_transaction_pipeline.dart';
+import 'package:yenma/data/sms_transaction_references.dart';
 import 'package:yenma/domain/money.dart';
 
 void main() {
   test('SMS imports retain the message timestamp', () {
     final timestamp = DateTime(2026, 9, 10, 21, 37);
-    final transaction = SmsParser.parse(
+    final transaction = SmsTransactionPipeline.parse(
       BankSms(
         address: 'HDFC',
         body: 'INR 125.50 debited at Corner Cafe',
@@ -18,7 +20,7 @@ void main() {
   });
 
   test('HDFC card purchase is separated from the bank account', () {
-    final transaction = SmsParser.parse(
+    final transaction = SmsTransactionPipeline.parse(
       BankSms(
         address: 'HDFCCB',
         body: 'Spent Rs.219.41 On HDFC Bank Card XX4321 At ZOMATO LIMITED On 2026-10-08:23:07:12. Not You?',
@@ -37,7 +39,7 @@ void main() {
   });
 
   test('successful card autopay is an expense', () {
-    final transaction = SmsParser.parse(
+    final transaction = SmsTransactionPipeline.parse(
       BankSms(
         address: 'HDFCCB',
         body: '''AutoPay (E-mandate) Success!
@@ -59,7 +61,7 @@ Mandate ID: 00000001''',
   });
 
   test('card bill payment is a transfer rather than income', () {
-    final transaction = SmsParser.parse(
+    final transaction = SmsTransactionPipeline.parse(
       BankSms(
         address: 'HDFCCB',
         body: 'DEAR HDFCBANK CARDMEMBER, PAYMENT OF Rs. 4856.00 RECEIVED TOWARDS YOUR CREDIT CARD ENDING WITH 4321 ON 26-9-2026.',
@@ -76,7 +78,7 @@ Mandate ID: 00000001''',
   });
 
   test('HDFC account debit and credit retain account identity', () {
-    final debit = SmsParser.parse(
+    final debit = SmsTransactionPipeline.parse(
       BankSms(
         address: 'HDFCBK',
         body: '''Sent Rs.5000.00
@@ -87,7 +89,7 @@ Ref 000000000056''',
         timestamp: DateTime(2026, 9, 22, 18),
       ),
     )!;
-    final credit = SmsParser.parse(
+    final credit = SmsTransactionPipeline.parse(
       BankSms(
         address: 'HDFCBK',
         body: 'Credit Alert! Rs.20000.00 credited to HDFC Bank A/c XX1234 on 07-10-26 from VPA sample@ybl (UPI 00000000022)',
@@ -106,7 +108,7 @@ Ref 000000000056''',
   });
 
   test('future card debit notification is not imported', () {
-    final transaction = SmsParser.parse(
+    final transaction = SmsTransactionPipeline.parse(
       BankSms(
         address: 'HDFCCB',
         body: 'INR.199.00 will be debited on 20/09/2026 from HDFC Bank Card 4321 for NETFLIX',
@@ -118,14 +120,14 @@ Ref 000000000056''',
   });
 
   test('generic instrument rules apply to other recognized banks', () {
-    final iciciCard = SmsParser.parse(
+    final iciciCard = SmsTransactionPipeline.parse(
       BankSms(
         address: 'ICICIB',
         body: 'INR 750.00 spent on ICICI Bank Credit Card XX9876 at BOOK STORE',
         timestamp: DateTime(2026, 10, 8),
       ),
     )!;
-    final sbiAccount = SmsParser.parse(
+    final sbiAccount = SmsTransactionPipeline.parse(
       BankSms(
         address: 'SBIINB',
         body: 'Rs.1200 debited from SBI Account XX2468 to POWER COMPANY',
@@ -142,16 +144,16 @@ Ref 000000000056''',
   });
 
   test('every recognized institution derives a credit card source', () {
-    for (final entry in SmsParser.bankNames.entries) {
-      final transaction = SmsParser.parse(
+    for (final institution in SmsTransactionReferences.institutions) {
+      final transaction = SmsTransactionPipeline.parse(
         BankSms(
-          address: entry.key,
+          address: institution.senderCode,
           body:
-              'Rs.100 spent on ${entry.value} Credit Card XX1234 at TEST SHOP',
+              'Rs.100 spent on ${institution.displayName} Credit Card XX1234 at TEST SHOP',
           timestamp: DateTime(2026, 10, 8),
         ),
       )!;
-      final issuer = entry.value.replaceFirst(
+      final issuer = institution.displayName.replaceFirst(
         RegExp(r'\s+Bank$', caseSensitive: false),
         '',
       );
@@ -159,7 +161,7 @@ Ref 000000000056''',
       expect(
         transaction.bankName,
         '$issuer Credit Card',
-        reason: 'Card variant for ${entry.value}',
+        reason: 'Card variant for ${institution.displayName}',
       );
       expect(transaction.instrumentType, FinancialInstrumentType.creditCard);
     }

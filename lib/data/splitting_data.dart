@@ -3,128 +3,17 @@ import 'package:sqflite/sqflite.dart';
 import '../domain/debt.dart';
 import '../domain/money.dart';
 import '../domain/split.dart';
+import '../models/splitting/split_allocation_record.dart';
 
-Future<void> createSplittingSchema(DatabaseExecutor db) async {
-  await db.execute('''CREATE TABLE IF NOT EXISTS associate_group (
-    group_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_name TEXT NOT NULL,
-    note TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )''');
-  await _addSplitColumn(
-    db,
-    'associate_group',
-    'note',
-    "TEXT NOT NULL DEFAULT ''",
-  );
-  await db.execute('''CREATE TABLE IF NOT EXISTS associate_group_mapping (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id INTEGER NOT NULL REFERENCES associate_group(group_id) ON DELETE CASCADE,
-    associate_id INTEGER NOT NULL REFERENCES associates(id) ON DELETE RESTRICT,
-    UNIQUE(group_id, associate_id)
-  )''');
-  await db.execute(
-    'CREATE INDEX IF NOT EXISTS associate_group_mapping_associate '
-    'ON associate_group_mapping(associate_id)',
-  );
-  await db.execute('''CREATE TABLE IF NOT EXISTS split_allocation (
-    allocation_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    associate_group_id INTEGER REFERENCES associate_group(group_id) ON DELETE SET NULL,
-    amount_paise INTEGER NOT NULL CHECK(amount_paise > 0),
-    title TEXT NOT NULL DEFAULT 'Shared expense',
-    paid_by_associate_id INTEGER REFERENCES associates(id) ON DELETE RESTRICT,
-    note TEXT NOT NULL DEFAULT '',
-    date TEXT NOT NULL
-  )''');
-  await _addSplitColumn(
-    db,
-    'split_allocation',
-    'title',
-    "TEXT NOT NULL DEFAULT 'Shared expense'",
-  );
-  await _addSplitColumn(
-    db,
-    'split_allocation',
-    'paid_by_associate_id',
-    'INTEGER',
-  );
-  await db.execute(
-    'CREATE INDEX IF NOT EXISTS split_allocation_group '
-    'ON split_allocation(associate_group_id)',
-  );
-  await db.execute(
-    'CREATE INDEX IF NOT EXISTS split_allocation_date ON split_allocation(date)',
-  );
-  await db.execute('''CREATE TABLE IF NOT EXISTS split_allocation_mapping (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    allocation_id INTEGER NOT NULL REFERENCES split_allocation(allocation_id) ON DELETE CASCADE,
-    associate_id INTEGER NOT NULL REFERENCES associates(id) ON DELETE RESTRICT,
-    split_amount_paise INTEGER NOT NULL CHECK(split_amount_paise > 0),
-    UNIQUE(allocation_id, associate_id)
-  )''');
-  await db.execute(
-    'CREATE INDEX IF NOT EXISTS split_allocation_mapping_associate '
-    'ON split_allocation_mapping(associate_id)',
-  );
-  await db.execute('''CREATE TABLE IF NOT EXISTS split_allocation_share (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    allocation_id INTEGER NOT NULL REFERENCES split_allocation(allocation_id) ON DELETE CASCADE,
-    associate_id INTEGER REFERENCES associates(id) ON DELETE RESTRICT,
-    participant_name TEXT NOT NULL,
-    is_me INTEGER NOT NULL DEFAULT 0 CHECK(is_me IN (0,1)),
-    split_amount_paise INTEGER NOT NULL CHECK(split_amount_paise > 0),
-    debt_id INTEGER REFERENCES debts(id) ON DELETE SET NULL,
-    CHECK((is_me = 1 AND associate_id IS NULL) OR (is_me = 0 AND associate_id IS NOT NULL)),
-    UNIQUE(allocation_id, associate_id)
-  )''');
-  await db.execute(
-    'CREATE INDEX IF NOT EXISTS split_share_allocation '
-    'ON split_allocation_share(allocation_id)',
-  );
-  await db.execute(
-    'CREATE UNIQUE INDEX IF NOT EXISTS split_share_one_me '
-    'ON split_allocation_share(allocation_id) WHERE is_me = 1',
-  );
-}
+export '../models/splitting/split_allocation_record.dart';
+export 'splitting/splitting_schema.dart';
 
-Future<void> _addSplitColumn(
-  DatabaseExecutor db,
-  String table,
-  String column,
-  String definition,
-) async {
-  final columns = await db.rawQuery('PRAGMA table_info($table)');
-  if (columns.any((row) => row['name'] == column)) return;
-  await db.execute('ALTER TABLE $table ADD COLUMN $column $definition');
-}
-
-class SplitShare {
-  const SplitShare({required this.associateId, required this.amountPaise});
-  final int associateId;
-  final int amountPaise;
-}
-
-class SplitAllocationRecord {
-  const SplitAllocationRecord({
-    this.id,
-    this.associateGroupId,
-    required this.amountPaise,
-    required this.date,
-    this.note = '',
-    this.shares = const [],
-  });
-  final int? id;
-  final int? associateGroupId;
-  final int amountPaise;
-  final DateTime date;
-  final String note;
-  final List<SplitShare> shares;
-}
-
+/// Low-level persistence API for legacy split allocations and group membership.
 class SplittingRepository {
   const SplittingRepository(this.db);
   final Database db;
 
+  /// Creates a group and links each distinct associate identifier to it.
   Future<int> createGroup(String name, Iterable<int> associateIds) =>
       db.transaction((txn) async {
         final groupId = await txn.insert('associate_group', {
@@ -139,6 +28,7 @@ class SplittingRepository {
         return groupId;
       });
 
+  /// Validates and stores an allocation whose shares exactly equal its total.
   Future<int> saveAllocation(SplitAllocationRecord allocation) async {
     if (allocation.amountPaise <= 0 ||
         allocation.shares.isEmpty ||
@@ -206,6 +96,7 @@ class SplittingRepository {
     });
   }
 
+  /// Deletes an allocation; foreign-key cascades remove its share mappings.
   Future<void> deleteAllocation(int id) async {
     await db.delete(
       'split_allocation',
@@ -215,9 +106,11 @@ class SplittingRepository {
   }
 }
 
+/// Implements the application split contract using the host SQLite database.
 mixin SqliteSplitOperations implements SplitRepository {
   Database get splitDatabase;
 
+  /// Loads split groups with members and their latest allocation activity.
   @override
   Future<List<SplitGroup>> splitGroups() async {
     final groups = await splitDatabase.rawQuery('''
@@ -261,6 +154,7 @@ mixin SqliteSplitOperations implements SplitRepository {
     return result;
   }
 
+  /// Creates a group after normalizing and deduplicating member names.
   @override
   Future<int> createSplitGroup({
     required String name,
@@ -313,6 +207,7 @@ mixin SqliteSplitOperations implements SplitRepository {
     });
   }
 
+  /// Loads allocations and debt settlement state for [groupId].
   @override
   Future<List<SplitEntry>> splitEntries(int groupId) async {
     final allocations = await splitDatabase.query(
@@ -378,6 +273,7 @@ mixin SqliteSplitOperations implements SplitRepository {
     return result;
   }
 
+  /// Stores a balanced split and creates debts implied by its payer.
   @override
   Future<int> saveSplitEntry(SplitEntryDraft draft) async {
     if (draft.title.trim().isEmpty ||
@@ -467,6 +363,7 @@ mixin SqliteSplitOperations implements SplitRepository {
     });
   }
 
+  /// Creates the personal debt generated by one non-self split share.
   Future<int> _insertSplitDebt(
     DatabaseExecutor db, {
     required int associateId,

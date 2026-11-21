@@ -1,63 +1,20 @@
 import 'package:sqflite/sqflite.dart';
 
-class BankRecord {
-  const BankRecord({
-    this.id,
-    required this.name,
-    required this.code,
-    this.isTracked = true,
-    this.isCreditCard = false,
-    this.createdAt,
-  });
-  final int? id;
-  final String name;
-  final String code;
-  final bool isTracked;
-  final bool isCreditCard;
-  final DateTime? createdAt;
-}
+import '../models/reference_data/associate_record.dart';
+import '../models/reference_data/bank_record.dart';
+import '../models/reference_data/plan_type_record.dart';
 
-class AssociateRecord {
-  const AssociateRecord({this.id, required this.name, this.phoneNumber});
-  final int? id;
-  final String name;
-  final String? phoneNumber;
-}
+export '../models/reference_data/associate_record.dart';
+export '../models/reference_data/bank_record.dart';
+export '../models/reference_data/plan_type_record.dart';
+export 'reference_data/reference_data_schema.dart';
 
-class PlanTypeRecord {
-  const PlanTypeRecord({this.id, required this.plan});
-  final int? id;
-  final String plan;
-}
-
-Future<void> createReferenceDataSchema(DatabaseExecutor db) async {
-  await db.execute('''CREATE TABLE IF NOT EXISTS banks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    bank_name TEXT NOT NULL,
-    bank_code TEXT NOT NULL UNIQUE,
-    is_tracked INTEGER NOT NULL DEFAULT 1 CHECK(is_tracked IN (0,1)),
-    is_credit_card INTEGER NOT NULL DEFAULT 0 CHECK(is_credit_card IN (0,1)),
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  )''');
-  await db.execute('''CREATE TABLE IF NOT EXISTS associates (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL CHECK(length(trim(name)) > 0),
-    phone_number TEXT UNIQUE
-  )''');
-  await db.execute(
-    'CREATE UNIQUE INDEX IF NOT EXISTS associates_normalized_name '
-    'ON associates(lower(trim(name)))',
-  );
-  await db.execute('''CREATE TABLE IF NOT EXISTS plan_type (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    plan TEXT NOT NULL UNIQUE
-  )''');
-}
-
+/// Maintains reusable banks, associates and plan-type reference records.
 class ReferenceDataRepository {
   const ReferenceDataRepository(this.db);
   final Database db;
 
+  /// Loads banks alphabetically by their display name.
   Future<List<BankRecord>> banks() async =>
       (await db.query('banks', orderBy: 'bank_name COLLATE NOCASE'))
           .map(
@@ -72,6 +29,7 @@ class ReferenceDataRepository {
           )
           .toList();
 
+  /// Inserts or replaces a bank reference and returns its identifier.
   Future<int> saveBank(BankRecord bank) => db.insert('banks', {
     if (bank.id != null) 'id': bank.id,
     'bank_name': bank.name.trim(),
@@ -80,6 +38,7 @@ class ReferenceDataRepository {
     'is_credit_card': bank.isCreditCard ? 1 : 0,
   }, conflictAlgorithm: ConflictAlgorithm.replace);
 
+  /// Loads people available to debt and split features.
   Future<List<AssociateRecord>> associates() async =>
       (await db.query('associates', orderBy: 'name COLLATE NOCASE'))
           .map(
@@ -91,6 +50,7 @@ class ReferenceDataRepository {
           )
           .toList();
 
+  /// Inserts or replaces an associate and returns its identifier.
   Future<int> saveAssociate(AssociateRecord associate) =>
       db.insert('associates', {
         if (associate.id != null) 'id': associate.id,
@@ -98,6 +58,7 @@ class ReferenceDataRepository {
         'phone_number': associate.phoneNumber?.trim(),
       }, conflictAlgorithm: ConflictAlgorithm.replace);
 
+  /// Loads reusable plan types in insertion order.
   Future<List<PlanTypeRecord>> planTypes() async =>
       (await db.query('plan_type', orderBy: 'id ASC'))
           .map(

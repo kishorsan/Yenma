@@ -6,11 +6,16 @@ import 'package:image_picker/image_picker.dart';
 
 import '../domain/debt.dart';
 
+/// Supplies validated receipt-image bytes to transaction and debt forms.
 abstract interface class ReceiptSource {
+  /// Lets the user select one receipt image, or returns `null` if cancelled.
   Future<Uint8List?> pick();
+
+  /// Recovers an interrupted Android image-picker request when available.
   Future<Uint8List?> recover();
 }
 
+/// Receipt source backed by `image_picker` with size and decode validation.
 class ImageReceiptSource implements ReceiptSource {
   final _picker = ImagePicker();
   @override
@@ -32,6 +37,7 @@ class ImageReceiptSource implements ReceiptSource {
     }
   }
 
+  /// Reads [image] only after enforcing the receipt limit and decoding it.
   Future<Uint8List> _read(XFile image) async {
     if (await image.length() > maxReceiptBytes) {
       throw const DebtValidationException(

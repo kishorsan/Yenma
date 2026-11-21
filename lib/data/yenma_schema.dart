@@ -1,13 +1,14 @@
 import 'package:sqflite/sqflite.dart';
 
-import 'commitments_data.dart';
-import 'planning_data.dart';
-import 'reference_data.dart';
-import 'splitting_data.dart';
+import 'commitments/commitments_schema.dart';
+import 'planning/planning_schema.dart';
+import 'reference_data/reference_data_schema.dart';
+import 'splitting/splitting_schema.dart';
 
-/// Creates the DBML-backed schema that is additive to the legacy money/debt
-/// tables. Existing columns remain in place because the current UI still uses
-/// them; canonical foreign keys are populated alongside those columns.
+/// Creates normalized feature tables and extends legacy money/debt tables.
+///
+/// Existing columns remain because current features still read them; canonical
+/// foreign keys are populated alongside those columns for gradual migration.
 Future<void> createStructuredDataSchema(DatabaseExecutor db) async {
   await createReferenceDataSchema(db);
   await createPlanningSchema(db);
@@ -18,6 +19,7 @@ Future<void> createStructuredDataSchema(DatabaseExecutor db) async {
   await _createCompatibilityForeignKeyTriggers(db);
 }
 
+/// Adds trigger-based integrity checks for columns added to legacy tables.
 Future<void> _createCompatibilityForeignKeyTriggers(DatabaseExecutor db) async {
   await db.execute('''CREATE TRIGGER IF NOT EXISTS transactions_bank_insert
     BEFORE INSERT ON transactions WHEN NEW.bank_id IS NOT NULL
@@ -45,6 +47,7 @@ Future<void> _createCompatibilityForeignKeyTriggers(DatabaseExecutor db) async {
     BEGIN SELECT RAISE(ABORT, 'invalid debts.associate_id'); END''');
 }
 
+/// Adds normalized reference columns while retaining legacy display columns.
 Future<void> _extendLegacyMoneyTables(DatabaseExecutor db) async {
   await _addColumn(
     db,
@@ -76,6 +79,7 @@ Future<void> _extendLegacyMoneyTables(DatabaseExecutor db) async {
   );
 }
 
+/// Adds one migration column when it is absent from an existing table.
 Future<void> _addColumn(
   DatabaseExecutor db,
   String table,
@@ -87,6 +91,7 @@ Future<void> _addColumn(
   await db.execute('ALTER TABLE $table ADD COLUMN $column $definition');
 }
 
+/// Resolves legacy text values into canonical bank, associate and plan IDs.
 Future<void> _backfillCanonicalReferences(DatabaseExecutor db) async {
   final legacyBanks = await db.query(
     'transactions',
